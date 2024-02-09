@@ -4,9 +4,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 def main():
+    """
+    Main function to load BrainVision data, apply a band-pass filter, plot the raw data,
+    perform a Fast Fourier Transform (FFT) to analyze frequency components, convert power spectral densities (PSDs) to dB,
+    and plot the PSD.
+    """
     # Load the ECoG dataset
-    # Replace 'path_to_your_ECoG_data.vhdr' with the actual path to your BrainVision header file
-    raw = mne.io.read_raw_brainvision('D:\CCEP_Data_Utrecht\sub-ccepAgeUMCU01\ses-1\ieeg\sub-ccepAgeUMCU01_ses-1_task-SPESclin_run-021448_ieeg.vhdr', preload=True)
+    raw = mne.io.read_raw_brainvision(r"D:\CCEP_Data_Utrecht\sub-ccepAgeUMCU01\ses-1\ieeg\sub-ccepAgeUMCU01_ses-1_task-SPESclin_run-021448_ieeg.vhdr", preload = True)
 
     # Apply a band-pass filter
     raw.filter(l_freq=0.1, h_freq=70)
@@ -32,4 +36,7 @@ def main():
     plt.show()
 
 if __name__ == "__main__":
+    """
+    Main entry point of the script.
+    """
     main()
