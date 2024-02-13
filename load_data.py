@@ -40,12 +40,13 @@ def load_data():
     os.chdir(r"D:\CCEP_Data_Utrecht\sub-ccepAgeUMCU01\ses-1\ieeg")
 
     # Load the ECoG dataset & TSV files
-    raw = mne.io.read_raw_brainvision(('sub-ccepAgeUMCU01_ses-1_task-SPESclin_run-021448_ieeg.vhdr'),
-                                    preload=True)
+    raw = mne.io.read_raw_brainvision((
+        'sub-ccepAgeUMCU01_ses-1_task-SPESclin_run-021448_ieeg.vhdr'), preload=True)
     electrodes = pd.read_csv('sub-ccepAgeUMCU01_ses-1_electrodes.tsv', sep='\t')
-    channels = pd.read_csv('sub-ccepAgeUMCU01_ses-1_task-SPESclin_run-021448_channels.tsv', sep='\t')
+    channels = pd.read_csv('sub-ccepAgeUMCU01_ses-1_task-SPESclin_run-021448_channels.tsv',
+                           sep='\t')
     events = pd.read_csv('sub-ccepAgeUMCU01_ses-1_task-SPESclin_run-021448_events.tsv', sep='\t')
-    
+
     return raw, electrodes, channels, events
 
 def preprocess(raw, channels, events):
@@ -53,7 +54,7 @@ def preprocess(raw, channels, events):
     raw.filter(l_freq=1, h_freq=70)
 
     # Filter out the ECoG channels in channels.tsv
-    ecog_channels = channels[channels['type'] == 'ECOG']['name'].tolist()  
+    ecog_channels = channels[channels['type'] == 'ECOG']['name'].tolist()
 
     # Pick ECoG channels in raw data
     raw_ecog = raw.pick(ecog_channels)
@@ -69,7 +70,7 @@ def preprocess(raw, channels, events):
 
     # Extract CCEP Epochs
     epochs = mne.Epochs(raw_ecog, events_ccep, event_id=1, tmin=-0.1, tmax=0.1)
-    
+
     return epochs
 
 def plot_raw(raw):
@@ -78,7 +79,7 @@ def plot_raw(raw):
     """
     # Plot the raw data
     raw.plot(block=True, title="Raw Data")
-    
+
 def plot_epochs(epochs):
     """
     Function to plot the epochs.
@@ -92,7 +93,7 @@ def plot_psd(raw):
     convert power spectral densities (PSDs) to dB, and plot the PSD.
     """
     data = raw.get_data()
-    
+
     # Perform a Fast Fourier Transform (FFT) to analyze frequency components
     psds, freqs = mne.time_frequency.psd_array_welch(
         data, sfreq=raw.info['sfreq'], fmin=1, fmax=50
@@ -119,7 +120,7 @@ def map_amplitude(epochs):
     plt.figure(figsize=(10, 6))
     sns.heatmap(amplitudes_grid, cmap='viridis')
     plt.show()
-    
+
     return amplitudes
 
 def map_overlay(amplitudes, electrodes, raw):
@@ -131,20 +132,20 @@ def map_overlay(amplitudes, electrodes, raw):
     # img = new_img_like(raw, np.ones(raw.get_data().shape))
     # # Plot the CCEP response on the brain
     # display = plotting.plot_img(img, bg_img=False, cut_coords=(0, 0, 0), title="CCEP Response")
-    # display.add_overlay(img, cmap='hot', threshold=0.5)   
+    # display.add_overlay(img, cmap='hot', threshold=0.5)
 
     amplitudes = amplitudes[0, :48].reshape(-1, 1)
     destrieux_atlas = datasets.fetch_atlas_destrieux_2009()
-    
+
     amplitudes = np.array([0.5, 0.7, 0.9])
     electrode_coords = np.array([[30, 40, 50], [60, 70, 20], [60, 75, 75]])
-    
+
     amplitude_image = np.zeros([76, 93, 76] , dtype=float)
     for coord, amp in zip(electrode_coords, amplitudes):
         amplitude_image[tuple(coord)] = amp
-    
-    
-    
+
+
+
     # electrodes_destrieux = electrodes[['name', 'Destrieux_label']][:48]
     # amplitude_map = np.zeros_like(destrieux_atlas['maps'], dtype=float)
     # print(amplitude_map.shape)
@@ -156,7 +157,8 @@ def map_overlay(amplitudes, electrodes, raw):
     amplitude_image = image.new_img_like(destrieux_atlas.maps, amplitude_image)
 
     # Plot the atlas with the amplitude overlay
-    plotting.plot_stat_map(amplitude_image, bg_img=destrieux_atlas.maps, threshold=0.1, colorbar=True)
+    plotting.plot_stat_map(amplitude_image, bg_img=destrieux_atlas.maps,
+                           threshold=0.1, colorbar=True)
     plotting.show()
 
 if __name__ == "__main__":
