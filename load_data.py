@@ -5,15 +5,21 @@ converts power spectral densities (PSDs) to dB, and plots the PSD.
 """
 # Import necessary libraries
 import os
+import select
 import mne
 from mne.epochs import Epochs
+from mne.viz import plot_alignment, snapshot_brain_montage
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
-import nibabel as nib
+# import nibabel as nib
 from nilearn import datasets, plotting, image
-from nilearn.image import new_img_like
+# from nilearn.image import new_img_like
+
+# paths to mne datasets - FreeSurfer subject
+sample_path = mne.datasets.sample.data_path()
+subjects_dir = sample_path / "subjects"
 
 def main():
     """
@@ -24,19 +30,33 @@ def main():
     # Load the data
     raw, electrodes, channels, events = load_data()
     # # Plot the raw data
-    # plot_raw(raw)    
+    # plot_raw(raw)
     # Preprocess the raw data into epochs
-    epochs = preprocess(raw, channels, events)
+    epochs, raw_ecog = preprocess(raw, channels, events, electrodes)
+    # Make scatterplot of available electrode locations
+    # plot_electrodes(electrodes, raw_ecog)
     # #Plot the PSD
     # plot_psd(raw)
     # #Plot the epochs
     # plot_epochs(epochs)
-    # #Map the amplitude of the CCEP response
+    # # Map the amplitude of the CCEP response
     # amplitudes = map_amplitude(epochs)
     # #Map the CCEP response on the brain
     # map_overlay(amplitudes, electrodes, raw)
 
 def load_data():
+    """
+    Loads the ECoG dataset and associated TSV files.
+
+    This function changes the current directory to the directory where the data is located,
+    and then loads the ECoG dataset and TSV files using the MNE library and pandas.
+
+    Returns:
+        raw (mne.io.Raw): The loaded ECoG dataset.
+        electrodes (pandas.DataFrame): The loaded electrodes information.
+        channels (pandas.DataFrame): The loaded channel information.
+        events (pandas.DataFrame): The loaded event information.
+    """
     # Change the current directory to the directory where the data is located
     os.chdir(r"D:\CCEP_Data_Utrecht\sub-ccepAgeUMCU01\ses-1\ieeg")
 
@@ -56,97 +76,112 @@ def plot_raw(raw):
     """
     # Plot the raw data
     raw.plot(block=True, title="Raw Data")
-    
-def preprocess(raw, channels, events):
+
+def preprocess(raw, channels, events, electrodes):
+    """
+    Preprocesses the raw data by filtering ECoG channels, applying a band-pass filter,
+    and extracting CCEP events.
+
+    Args:
+        raw (mne.io.Raw): The raw data.
+        channels (pandas.DataFrame): DataFrame containing information about the channels.
+        events (pandas.DataFrame): DataFrame containing information about the events.
+
+    Returns:
+        mne.Epochs: The preprocessed epochs.
+
+    Raises:
+        ValueError: If no epochs are found for a specific stimulation pair.
+
+    """
     # Filter out the ECoG channels in channels.tsv
     ecog_channels = channels[channels['type'] == 'ECOG']['name'].tolist()
 
     # Pick ECoG channels in raw data
     orig_raw = raw.copy()
     raw_ecog = raw.pick(ecog_channels)
+    
+    # # Apply a band-pass filter to raw data
+    # raw_ecog.filter(l_freq=1, h_freq=40, method = 'iir')
 
-    # Apply a band-pass filter to raw data
-    raw_ecog.filter(l_freq=1, h_freq=40)
+    # Make electrode postions into a dictionary
+    el_position = {row['name']: [row['x'], row['y'], row['z']] for index, row in electrodes.iterrows()}
+
+    # Change position of electrodes to meters
+    for key in el_position:
+        el_position[key] = [i / 1000 for i in el_position[key]]
+
+    # the coordinate frame of the montage
+    montage = mne.channels.make_dig_montage(el_position, coord_frame='mni_tal')
+    montage.add_mni_fiducials(subjects_dir)
+    raw_ecog.set_montage(montage)
+
+    fig = plot_alignment(
+        raw_ecog.info,
+        trans="fsaverage",
+        subject="fsaverage",
+        subjects_dir=subjects_dir,
+        surfaces="pial",
+        show_axes=True,
+        ecog = True,
+        sensor_colors=(1.0, 1.0, 1.0, 0.5),
+        coord_frame="auto"
+    )
+    mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
+    xy, im = snapshot_brain_montage(fig, raw_ecog.info)
+
 
     # Extract CCEP events from events.tsv
     events_ccep = events[['sample_start', 'trial_type', 'electrical_stimulation_site']]
     events_ccep = events_ccep[events_ccep['trial_type'] == 'electrical_stimulation']
     events_ccep = events_ccep.drop(columns = ['trial_type'])
-    
-    # HOE MAAK JE VAN DEZE DATA EEN EVENT DICTIONARY? VERVANG STIMULATION SITE DOOR EVENT ID
-    
-    # Event dictionary with event_id being stimulated electrode?
-    event_id = dict({'PT01-PT02': 0,  'PT03-PT02': 1,  'PT03-PT04': 2,  'PT05-PT04': 3,
-                     'PT05-PT06': 4,  'PT07-PT06': 5,  'PT07-PT08': 6,  'PT09-PT08': 7,
-                     'PT09-PT10': 8,  'PT11-PT10': 9,  'PT11-PT12': 10, 'PT13-PT12': 11,
-                     'PT13-PT14': 12, 'PT15-PT14': 13, 'PT15-PT16': 14, 'PT17-PT16': 15,
-                     'PT17-PT18': 16, 'PT19-PT18': 17, 'PT19-PT20': 18, 'PT21-PT20': 19,
-                     'PT21-PT22': 20, 'PT23-PT22': 21, 'PT23-PT24': 22, 'PT25-PT24': 23,
-                     'PT25-PT26': 24, 'PT27-PT26': 25, 'PT27-PT28': 26, 'PT29-PT28': 27,
-                     'PT29-PT30': 28, 'PT31-PT30': 29, 'PT31-PT32': 30, 'PT33-PT32': 31,
-                     'PT33-PT34': 32, 'PT35-PT34': 33, 'PT35-PT36': 34, 'PT37-PT36': 35,
-                     'PT37-PT38': 36, 'PT39-PT38': 37, 'PT39-PT40': 38, 'PT41-PT40': 39,
-                     'PT41-PT42': 40, 'PT43-PT42': 41, 'PT43-PT44': 42, 'PT45-PT44': 43,
-                     'PT45-PT46': 44, 'PT47-PT46': 45, 'PT47-PT48': 46, 'F49-F50': 47,
-                     'F51-F50': 48,   'F51-F52': 49,   'F53-F52': 50})
+
+    # Create a dictionary of event IDs extracted from events_ccep
+    unique_stim_sites = events_ccep['electrical_stimulation_site'].unique()
+    event_id = {site: i for i, site in enumerate(unique_stim_sites)}
 
     # Change 'electrical_stimulation' to integer 1, add a column of zeros, make integer array
     events_ccep['electrical_stimulation_site'] = events_ccep['electrical_stimulation_site'].replace(event_id)
     events_ccep.insert(loc=1, column='Zeros', value=np.zeros(events_ccep.shape[0], dtype=int))
     events_ccep = events_ccep.values.astype(int)
 
+    # initialize empty list to store epochs
+    epochs = []
+
     for i in range(0, len(event_id)):
         # Extract CCEP Epochs
         try:
-            epochs = Epochs(raw_ecog, events_ccep, event_id=i, tmin=-2, tmax=2, baseline=(-2, -1), preload=True)
+            epoch = Epochs(raw_ecog, events_ccep, event_id=i, tmin=-2, tmax=2,
+                            baseline=(-1, -0.1), preload=True)
             stim_pair = list(event_id.keys())[i]
             stim_pair_split = stim_pair.split('-')
-            epochs.drop_channels(stim_pair_split)
-            print('\033[1m' + f'analyzing stimpair {stim_pair}' + '\033[0m')
-            epochs.plot_image(title=f'Averaged CCEP Response for stimpair {stim_pair}')
+            epoch.drop_channels(stim_pair_split)
+            print('\033[1m' + f'Analyzing stimpair {stim_pair}' + '\033[0m')
+            epochs.append(epoch)
+            # epochs.plot_image(title=f'Averaged CCEP Response for stimpair {stim_pair}')
         except ValueError:
             print('\033[1m' + f'No epochs found for {stim_pair}' + '\033[0m')
-    return epochs
+    epochs[0].plot_image(picks = [0], title='Averaged CCEP Response')
+
+    return epochs, raw_ecog
 
 def plot_epochs(epochs):
     """
     Function to plot the epochs.
     """
     # Plot the epochs
-    epochs.plot(block=True, title="Epochs")
-
-def plot_psd(raw):
-    """
-    Function to perform a Fast Fourier Transform (FFT) to analyze frequency components, 
-    convert power spectral densities (PSDs) to dB, and plot the PSD.
-    """
-    data = raw.get_data()
-
-    # Perform a Fast Fourier Transform (FFT) to analyze frequency components
-    psds, freqs = mne.time_frequency.psd_array_welch(
-        data, sfreq=raw.info['sfreq'], fmin=1, fmax=50
-    )
-
-    # Convert power spectral densities (PSDs) to dB
-    psds_db = 10 * np.log10(psds)
-
-    # Plot the PSD
-    plt.figure(figsize=(7, 4))
-    plt.plot(freqs, psds_db.mean(0).T, color='k', scalex=True, scaley=True)
-    plt.title('PSD (dB)')
-    plt.xlabel('Frequency (Hz)')
-    plt.ylabel('Power Spectral Density (dB)')
-    plt.show()
+    epochs[0].plot(block=True, title="Epochs")
 
 def map_amplitude(epochs):
     """
     Function to map the amplitude of the CCEP response.
     """
     # Extract CCEP amplitudes
-    amplitudes = epochs.get_data().max(axis=2) - epochs.get_data().min(axis=2)
-    amplitudes_grid = amplitudes[0, :48].reshape(6, 8)
-    plt.figure(figsize=(10, 6))
-    sns.heatmap(amplitudes_grid, cmap='viridis')
+    selected_epoch = epochs[1].copy()
+    amplitudes = selected_epoch.get_data(tmin = 0.009, tmax = 0.1).max(axis=2) - selected_epoch.get_data(tmin = 0.009, tmax = 0.1).min(axis=2)
+    # amplitudes_grid = amplitudes[0, :48].reshape(6, 8)
+    # plt.figure(figsize=(10, 6))
+    sns.heatmap(amplitudes, cmap='viridis')
     plt.show()
 
     return amplitudes
