@@ -5,7 +5,6 @@ converts power spectral densities (PSDs) to dB, and plots the PSD.
 """
 # Import necessary libraries
 import os
-import select
 import mne
 from mne.epochs import Epochs
 from mne.viz import plot_alignment, snapshot_brain_montage
@@ -13,9 +12,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
-# import nibabel as nib
-from nilearn import datasets, plotting, image
-# from nilearn.image import new_img_like
 
 # paths to mne datasets - FreeSurfer subject
 sample_path = mne.datasets.sample.data_path()
@@ -32,17 +28,15 @@ def main():
     # # Plot the raw data
     # plot_raw(raw)
     # Preprocess the raw data into epochs
-    epochs, raw_ecog = preprocess(raw, channels, events, electrodes)
+    raw_ecog, orig_raw = preprocess(raw, channels)
     # Make scatterplot of available electrode locations
-    # plot_electrodes(electrodes, raw_ecog)
-    # #Plot the PSD
-    # plot_psd(raw)
+    plot_electrodes(electrodes, raw_ecog)
+    # Make epochs
+    epochs = make_epochs(raw_ecog, events)
     # #Plot the epochs
     # plot_epochs(epochs)
     # # Map the amplitude of the CCEP response
     # amplitudes = map_amplitude(epochs)
-    # #Map the CCEP response on the brain
-    # map_overlay(amplitudes, electrodes, raw)
 
 def load_data():
     """
@@ -77,7 +71,7 @@ def plot_raw(raw):
     # Plot the raw data
     raw.plot(block=True, title="Raw Data")
 
-def preprocess(raw, channels, events, electrodes):
+def preprocess(raw, channels):
     """
     Preprocesses the raw data by filtering ECoG channels, applying a band-pass filter,
     and extracting CCEP events.
@@ -100,10 +94,16 @@ def preprocess(raw, channels, events, electrodes):
     # Pick ECoG channels in raw data
     orig_raw = raw.copy()
     raw_ecog = raw.pick(ecog_channels)
-    
+
     # # Apply a band-pass filter to raw data
     # raw_ecog.filter(l_freq=1, h_freq=40, method = 'iir')
 
+    return raw_ecog, orig_raw
+
+def plot_electrodes(electrodes, raw_ecog):
+    """
+    Function to plot the electrode locations.
+    """
     # Make electrode postions into a dictionary
     el_position = {row['name']: [row['x'], row['y'], row['z']] for index, row in electrodes.iterrows()}
 
@@ -129,8 +129,22 @@ def preprocess(raw, channels, events, electrodes):
     )
     mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
     xy, im = snapshot_brain_montage(fig, raw_ecog.info)
+    
+def make_epochs(raw_ecog, events):
+    """
+    Extracts CCEP events from the given events dataframe and creates epochs for each event.
 
+    Parameters:
+    raw_ecog (object): The raw ecog data.
+    events (DataFrame): The events dataframe containing information about the events.
 
+    Returns:
+    list: A list of epochs, each representing a CCEP event.
+
+    Raises:
+    ValueError: If no epochs are found for a specific stimulation pair.
+
+    """
     # Extract CCEP events from events.tsv
     events_ccep = events[['sample_start', 'trial_type', 'electrical_stimulation_site']]
     events_ccep = events_ccep[events_ccep['trial_type'] == 'electrical_stimulation']
@@ -158,12 +172,11 @@ def preprocess(raw, channels, events, electrodes):
             epoch.drop_channels(stim_pair_split)
             print('\033[1m' + f'Analyzing stimpair {stim_pair}' + '\033[0m')
             epochs.append(epoch)
-            # epochs.plot_image(title=f'Averaged CCEP Response for stimpair {stim_pair}')
         except ValueError:
             print('\033[1m' + f'No epochs found for {stim_pair}' + '\033[0m')
     epochs[0].plot_image(picks = [0], title='Averaged CCEP Response')
-
-    return epochs, raw_ecog
+    
+    return epochs
 
 def plot_epochs(epochs):
     """
@@ -179,50 +192,11 @@ def map_amplitude(epochs):
     # Extract CCEP amplitudes
     selected_epoch = epochs[1].copy()
     amplitudes = selected_epoch.get_data(tmin = 0.009, tmax = 0.1).max(axis=2) - selected_epoch.get_data(tmin = 0.009, tmax = 0.1).min(axis=2)
-    # amplitudes_grid = amplitudes[0, :48].reshape(6, 8)
-    # plt.figure(figsize=(10, 6))
+    plt.figure()
     sns.heatmap(amplitudes, cmap='viridis')
     plt.show()
 
     return amplitudes
-
-def map_overlay(amplitudes, electrodes, raw):
-    """
-    Function to overlay the CCEP response on the brain.
-    """
-    # # Overlay the CCEP response on the brain
-    # # Create a Nifti image
-    # img = new_img_like(raw, np.ones(raw.get_data().shape))
-    # # Plot the CCEP response on the brain
-    # display = plotting.plot_img(img, bg_img=False, cut_coords=(0, 0, 0), title="CCEP Response")
-    # display.add_overlay(img, cmap='hot', threshold=0.5)
-
-    amplitudes = amplitudes[0, :48].reshape(-1, 1)
-    destrieux_atlas = datasets.fetch_atlas_destrieux_2009()
-
-    amplitudes = np.array([0.5, 0.7, 0.9])
-    electrode_coords = np.array([[30, 40, 50], [60, 70, 20], [60, 75, 75]])
-
-    amplitude_image = np.zeros([76, 93, 76] , dtype=float)
-    for coord, amp in zip(electrode_coords, amplitudes):
-        amplitude_image[tuple(coord)] = amp
-
-
-
-    # electrodes_destrieux = electrodes[['name', 'Destrieux_label']][:48]
-    # amplitude_map = np.zeros_like(destrieux_atlas['maps'], dtype=float)
-    # print(amplitude_map.shape)
-    # for electrode, amplitude in zip(electrodes_destrieux['Destrieux_label'], amplitudes):
-    #     amplitude_map[destrieux_atlas['maps'] == electrode] = amplitude
-
-
-
-    amplitude_image = image.new_img_like(destrieux_atlas.maps, amplitude_image)
-
-    # Plot the atlas with the amplitude overlay
-    plotting.plot_stat_map(amplitude_image, bg_img=destrieux_atlas.maps,
-                           threshold=0.1, colorbar=True)
-    plotting.show()
 
 if __name__ == "__main__":
     main()
