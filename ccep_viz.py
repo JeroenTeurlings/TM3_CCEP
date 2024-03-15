@@ -10,6 +10,7 @@ from mne.epochs import Epochs
 from mne.viz import plot_alignment, snapshot_brain_montage
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import colormaps
 import seaborn as sns
 import pandas as pd
 
@@ -35,6 +36,7 @@ def main():
     epochs = make_epochs(raw_ecog, events)
     # #Plot the epochs
     # plot_epochs(epochs)
+    amplitudes, times, sensor_colors = find_ccep_peaks(epochs, raw_ecog)
     # # Map the amplitude of the CCEP response
     # amplitudes = map_amplitude(epochs)
 
@@ -174,7 +176,7 @@ def make_epochs(raw_ecog, events):
             epochs.append(epoch)
         except ValueError:
             print('\033[1m' + f'No epochs found for {stim_pair}' + '\033[0m')
-    epochs[0].plot_image(picks = [0], title='Averaged CCEP Response')
+    epochs[0].plot_image(picks = [94], title='Averaged CCEP Response')
     
     return epochs
 
@@ -185,6 +187,53 @@ def plot_epochs(epochs):
     # Plot the epochs
     epochs[0].plot(block=True, title="Epochs")
 
+def find_ccep_peaks(epochs, raw_ecog):
+    """
+    Function to find the peaks of the CCEP response.
+    """
+    # Extract CCEP amplitudes
+    selected_epoch = epochs[20].copy()
+    amplitudes = []
+    latencies = []
+    
+    for channels in range(len(selected_epoch.ch_names)):
+        epoch_ccep = selected_epoch.get_data(picks=[channels], tmin=0.009, tmax=0.1)
+        amplitude = epoch_ccep.max(axis=2)
+        time = epoch_ccep.argmax(axis=2)
+        latency = selected_epoch.times[time] + 2  # add 2 seconds to account for measurement window
+        amplitudes.append(amplitude.mean())
+        latencies.append(latency.mean())
+    
+    # convert to dataframe
+    amplitudes = pd.DataFrame(amplitudes)
+    latencies = pd.DataFrame(latencies)
+    
+    # scale values to be between 0 and 1, then map to colors
+    amplitudes -= amplitudes.min()
+    amplitudes /= amplitudes.max()
+    # Add two values of 1 at the start of the dataframe to compensate for the first two channels
+    amplitudes = pd.concat([pd.DataFrame([1, 1]), amplitudes], ignore_index=True)
+    rgba = colormaps.get_cmap("Reds")
+    sensor_colors = np.array(amplitudes.map(rgba).values.tolist(), float)
+    print(sensor_colors)
+    
+    fig = plot_alignment(
+        raw_ecog.info,
+        trans="fsaverage",
+        subject="fsaverage",
+        subjects_dir=subjects_dir,
+        surfaces="pial",
+        show_axes=True,
+        ecog = True,
+        sensor_colors=sensor_colors,
+        coord_frame="auto"
+    )
+    mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
+    xy, im = snapshot_brain_montage(fig, raw_ecog.info)
+    
+    
+    return amplitudes, latencies, sensor_colors
+    
 def map_amplitude(epochs):
     """
     Function to map the amplitude of the CCEP response.
