@@ -13,13 +13,17 @@ from matplotlib import colormaps
 import seaborn as sns
 import pandas as pd
 import scipy
+from PIL import Image
 
 # paths to mne datasets - FreeSurfer subject
 sample_path = mne.datasets.sample.data_path()
 subjects_dir = sample_path / "subjects"
 
 # Stimulus pair index to analyze
-EPOCH_INDEX = 10
+EPOCH_INDEX = 6
+
+# Global settings for plotting
+mne.viz.set_3d_backend('pyvista')
 
 def main():
     """
@@ -42,6 +46,8 @@ def main():
     amplitudes, latencies = find_ccep_peaks(epochs)
     # Plot the CCEP amplitude
     plot_ccep_amplitude(amplitudes, raw_ecog)
+    # Plot the CCEP amplitude over time
+    plot_mov_amplitude(epochs, raw_ecog)
     # Plot the CCEP latency
     plot_ccep_latency(latencies, raw_ecog)
     # Plot gamma power
@@ -222,10 +228,10 @@ def find_ccep_peaks(epochs):
             epoch_sd = 50/1000000
         amplitudes_index, _ = scipy.signal.find_peaks(epoch_averaged,
                                                    distance= 200)
-        plt.plot(epoch_averaged)
-        plt.plot(amplitudes_index, epoch_averaged[amplitudes_index], "x")
-        plt.plot(np.zeros_like(epoch_averaged), "--", color="gray")
-        plt.show()
+        # plt.plot(epoch_averaged)
+        # plt.plot(amplitudes_index, epoch_averaged[amplitudes_index], "x")
+        # plt.plot(np.zeros_like(epoch_averaged), "--", color="gray")
+        # plt.show()
         # if len(amplitudes_index[0]) == 0:
         #     amplitudes_index = [[0]]
         # If the peak is at the beginning or end of the epoch, make amplitude 0
@@ -278,6 +284,72 @@ def plot_ccep_amplitude(amplitudes, raw_ecog):
 
     mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
     xy, im = mne.viz.snapshot_brain_montage(fig, raw_ecog.info)
+
+def plot_mov_amplitude(epochs, raw_ecog):
+    # Extract CCEP amplitudes
+    selected_epoch = epochs[EPOCH_INDEX].copy()
+    selected_epoch = selected_epoch.crop(tmin = -0.1, tmax = 0.1)
+    all_amplitudes = []
+    images = []
+    
+    for samples in range(len(selected_epoch.times)):
+        print('Sample:', samples, 'of', len(selected_epoch.times))
+        # Determine the amplitude of the CCEP response
+        amplitudes = list()
+        for channels in range(len(selected_epoch.ch_names)):
+            # print('Channel:', channels, 'of', len(selected_epoch.ch_names))
+            epoch_averaged = np.mean(selected_epoch.copy().get_data(picks=[channels]), axis = 0).squeeze()
+            if samples < len(epoch_averaged):
+                amplitude = epoch_averaged[samples]
+                amplitudes.append(amplitude)
+        all_amplitudes.extend(amplitudes)
+
+    # Normalize all amplitudes
+    all_amplitudes = pd.DataFrame(all_amplitudes)
+    all_amplitudes -= all_amplitudes.min()
+    all_amplitudes /= all_amplitudes.max()
+
+    # Map all amplitudes to colors
+    vmin = np.percentile(all_amplitudes, 1)
+    vmax = np.percentile(all_amplitudes, 99)
+    rgba = colormaps.get_cmap("RdBu_r")
+    all_colors = np.array(all_amplitudes.map(lambda x: rgba((x - vmin) / (vmax - vmin))).values.tolist(), float)
+
+    for samples in range(len(selected_epoch.times)):
+        print('Plotting sample:', samples, 'of', len(selected_epoch.times))
+        # Get the colors for the current sample
+        sensor_colors = all_colors[samples * len(selected_epoch.ch_names):(samples + 1) * len(selected_epoch.ch_names)]
+
+        stim_color = np.array([[[1, 0.988, 0.216, 1]],
+                            [[1, 0.988, 0.216, 1]]]) # yellow
+        # Insert stimulation pair color at EPOCH_INDEX
+        sensor_colors = np.insert(sensor_colors, EPOCH_INDEX, stim_color, axis = 0)
+
+        # plot the brain with the electrode colors for amplitude
+        fig = mne.viz.plot_alignment(
+            raw_ecog.info,
+            trans="fsaverage",
+            subject="fsaverage",
+            subjects_dir=subjects_dir,
+            surfaces="pial",
+            show_axes=True,
+            ecog = True,
+            sensor_colors=sensor_colors,
+            coord_frame="auto",
+            verbose = False
+        )
+        # Set off_screen to True
+        fig.plotter.off_screen = True
+        mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
+        xy, im = mne.viz.snapshot_brain_montage(fig, raw_ecog.info)
+        pil_im = Image.fromarray(im)
+        images.append(pil_im)
+        # remove variable amplitude
+        mne.viz.close_3d_figure(fig)
+    
+    image_one = images[0]
+    image_one.save(f"CCEP_{EPOCH_INDEX}.gif", format="GIF", append_images=images[1:],
+                   save_all=True, duration=100, loop=0)
 
 def plot_ccep_latency(latencies, raw_ecog):
     """
