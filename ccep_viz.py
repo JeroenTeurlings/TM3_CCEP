@@ -7,16 +7,19 @@ converts power spectral densities (PSDs) to dB, and plots the PSD.
 import os
 import mne
 from mne.epochs import Epochs
-from mne.viz import plot_alignment, snapshot_brain_montage
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import colormaps
 import seaborn as sns
 import pandas as pd
+import scipy
 
 # paths to mne datasets - FreeSurfer subject
 sample_path = mne.datasets.sample.data_path()
 subjects_dir = sample_path / "subjects"
+
+# Stimulus pair index to analyze
+EPOCH_INDEX = 10
 
 def main():
     """
@@ -30,13 +33,19 @@ def main():
     # plot_raw(raw)
     # Preprocess the raw data into epochs
     raw_ecog, orig_raw = preprocess(raw, channels)
-    # Make scatterplot of available electrode locations
+    # Make visualisation of available electrode locations
     plot_electrodes(electrodes, raw_ecog)
     # Make epochs
     epochs = make_epochs(raw_ecog, events)
     # #Plot the epochs
     # plot_epochs(epochs)
-    amplitudes, times, sensor_colors = find_ccep_peaks(epochs, raw_ecog)
+    amplitudes, latencies = find_ccep_peaks(epochs)
+    # Plot the CCEP amplitude
+    plot_ccep_amplitude(amplitudes, raw_ecog)
+    # Plot the CCEP latency
+    plot_ccep_latency(latencies, raw_ecog)
+    # Plot gamma power
+    plot_ccep_gamma(epochs, raw_ecog)
     # # Map the amplitude of the CCEP response
     # amplitudes = map_amplitude(epochs)
 
@@ -54,16 +63,24 @@ def load_data():
         events (pandas.DataFrame): The loaded event information.
     """
     # Change the current directory to the directory where the data is located
-    os.chdir(r"D:\CCEP_Data_Utrecht\sub-ccepAgeUMCU01\ses-1\ieeg")
+    os.chdir(r"D:\CCEP_Data_Utrecht\sub-ccepAgeUMCU02\ses-1\ieeg")
+    # Subject
+    subject = 'sub-ccepAgeUMCU02'
+    # Session
+    session = 'ses-1'
+    # Task
+    task = 'task-SPESclin'
+    # Run
+    run = 'run-021804'
 
     # Load the ECoG dataset & TSV files
     raw = mne.io.read_raw_brainvision((
-        'sub-ccepAgeUMCU01_ses-1_task-SPESclin_run-021448_ieeg.vhdr'), preload=True)
-    electrodes = pd.read_csv('sub-ccepAgeUMCU01_ses-1_electrodes.tsv', sep='\t')
-    channels = pd.read_csv('sub-ccepAgeUMCU01_ses-1_task-SPESclin_run-021448_channels.tsv',
+        f'{subject}_{session}_{task}_{run}_ieeg.vhdr'), preload=True)
+    electrodes = pd.read_csv(f'{subject}_{session}_electrodes.tsv', sep='\t')
+    channels = pd.read_csv(f'{subject}_{session}_{task}_{run}_channels.tsv',
                            sep='\t')
-    events = pd.read_csv('sub-ccepAgeUMCU01_ses-1_task-SPESclin_run-021448_events.tsv', sep='\t')
-
+    events = pd.read_csv(f'{subject}_{session}_{task}_{run}_events.tsv', sep='\t')
+    print(raw.info)
     return raw, electrodes, channels, events
 
 def plot_raw(raw):
@@ -98,7 +115,7 @@ def preprocess(raw, channels):
     raw_ecog = raw.pick(ecog_channels)
 
     # # Apply a band-pass filter to raw data
-    # raw_ecog.filter(l_freq=1, h_freq=40, method = 'iir')
+    # raw_ecog.filter(l_freq=0.1, h_freq=40, method = 'iir')
 
     return raw_ecog, orig_raw
 
@@ -118,20 +135,20 @@ def plot_electrodes(electrodes, raw_ecog):
     montage.add_mni_fiducials(subjects_dir)
     raw_ecog.set_montage(montage)
 
-    fig = plot_alignment(
-        raw_ecog.info,
-        trans="fsaverage",
-        subject="fsaverage",
-        subjects_dir=subjects_dir,
-        surfaces="pial",
-        show_axes=True,
-        ecog = True,
-        sensor_colors=(1.0, 1.0, 1.0, 0.5),
-        coord_frame="auto"
-    )
-    mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
-    xy, im = snapshot_brain_montage(fig, raw_ecog.info)
-    
+    # fig = plot_alignment(
+    #     raw_ecog.info,
+    #     trans="fsaverage",
+    #     subject="fsaverage",
+    #     subjects_dir=subjects_dir,
+    #     surfaces="pial",
+    #     show_axes=True,
+    #     ecog = True,
+    #     sensor_colors=(1.0, 1.0, 1.0, 0.5),
+    #     coord_frame="auto"
+    # )
+    # mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
+    # xy, im = snapshot_brain_montage(fig, raw_ecog.info)
+
 def make_epochs(raw_ecog, events):
     """
     Extracts CCEP events from the given events dataframe and creates epochs for each event.
@@ -168,7 +185,7 @@ def make_epochs(raw_ecog, events):
         # Extract CCEP Epochs
         try:
             epoch = Epochs(raw_ecog, events_ccep, event_id=i, tmin=-2, tmax=2,
-                            baseline=(-1, -0.1), preload=True)
+                            baseline=(None, -0.1), preload=True)
             stim_pair = list(event_id.keys())[i]
             stim_pair_split = stim_pair.split('-')
             epoch.drop_channels(stim_pair_split)
@@ -176,8 +193,10 @@ def make_epochs(raw_ecog, events):
             epochs.append(epoch)
         except ValueError:
             print('\033[1m' + f'No epochs found for {stim_pair}' + '\033[0m')
-    epochs[0].plot_image(picks = [94], title='Averaged CCEP Response')
-    
+    epochs[EPOCH_INDEX].plot_image(picks = [0], title='Averaged CCEP Response')
+    evoked = epochs[EPOCH_INDEX].average()
+    # evoked.plot(spatial_colors=True, gfp=True, time_unit='s')
+    # evoked.plot_joint()
     return epochs
 
 def plot_epochs(epochs):
@@ -187,37 +206,65 @@ def plot_epochs(epochs):
     # Plot the epochs
     epochs[0].plot(block=True, title="Epochs")
 
-def find_ccep_peaks(epochs, raw_ecog):
+def find_ccep_peaks(epochs):
     """
     Function to find the peaks of the CCEP response.
     """
     # Extract CCEP amplitudes
-    selected_epoch = epochs[20].copy()
+    selected_epoch = epochs[EPOCH_INDEX].copy()
     amplitudes = []
     latencies = []
-    
+
     for channels in range(len(selected_epoch.ch_names)):
-        epoch_ccep = selected_epoch.get_data(picks=[channels], tmin=0.009, tmax=0.1)
-        amplitude = epoch_ccep.max(axis=2)
-        time = epoch_ccep.argmax(axis=2)
-        latency = selected_epoch.times[time] + 2  # add 2 seconds to account for measurement window
-        amplitudes.append(amplitude.mean())
-        latencies.append(latency.mean())
-    
+        epoch_averaged = np.mean(selected_epoch.copy().get_data(picks=[channels], tmin=0.01, tmax=0.09), axis = 0).squeeze()
+        epoch_sd = np.std(selected_epoch.get_data(picks=[channels], tmin=-2, tmax=-0.1))
+        if epoch_sd < 50/1000000:
+            epoch_sd = 50/1000000
+        amplitudes_index, _ = scipy.signal.find_peaks(epoch_averaged,
+                                                   distance= 200)
+        plt.plot(epoch_averaged)
+        plt.plot(amplitudes_index, epoch_averaged[amplitudes_index], "x")
+        plt.plot(np.zeros_like(epoch_averaged), "--", color="gray")
+        plt.show()
+        # if len(amplitudes_index[0]) == 0:
+        #     amplitudes_index = [[0]]
+        # If the peak is at the beginning or end of the epoch, make amplitude 0
+        print(amplitudes_index)
+        if amplitudes_index == 0 or amplitudes_index == len(epoch_averaged)-1:
+            amplitude = 0
+        else:
+            amplitude = epoch_averaged[amplitudes_index]
+        # Print if amplitude is below threshold
+        if amplitude < 2.6*epoch_sd:
+            print(f'Channel {channels} has an amplitude of {amplitude} which is below the threshold of {epoch_sd*2.6}')
+        else:
+            print('Amplitude correct')
+        latency = selected_epoch.times[amplitudes_index] + 2  # add 2 seconds to account for measurement window
+        print(f'Channel {channels} has a peak at {latency} seconds with an amplitude of {amplitude}')
+        amplitudes.append(amplitude)
+        latencies.append(latency)
+
+    return amplitudes, latencies
+
+def plot_ccep_amplitude(amplitudes, raw_ecog):
+    """
+    Function to plot the CCEP amplitude.
+    """
     # convert to dataframe
     amplitudes = pd.DataFrame(amplitudes)
-    latencies = pd.DataFrame(latencies)
-    
-    # scale values to be between 0 and 1, then map to colors
+
+    # scale amplitude values to be between 0 and 1, then map to colors
     amplitudes -= amplitudes.min()
     amplitudes /= amplitudes.max()
-    # Add two values of 1 at the start of the dataframe to compensate for the first two channels
-    amplitudes = pd.concat([pd.DataFrame([1, 1]), amplitudes], ignore_index=True)
     rgba = colormaps.get_cmap("Reds")
     sensor_colors = np.array(amplitudes.map(rgba).values.tolist(), float)
-    print(sensor_colors)
-    
-    fig = plot_alignment(
+    stim_color = np.array([[[1, 0.988, 0.216, 1]],
+                           [[1, 0.988, 0.216, 1]]]) # yellow
+    # Insert stimulation pair color at EPOCH_INDEX
+    sensor_colors = np.insert(sensor_colors, EPOCH_INDEX, stim_color, axis = 0)
+
+    # plot the brain with the electrode colors for amplitude
+    fig = mne.viz.plot_alignment(
         raw_ecog.info,
         trans="fsaverage",
         subject="fsaverage",
@@ -228,12 +275,79 @@ def find_ccep_peaks(epochs, raw_ecog):
         sensor_colors=sensor_colors,
         coord_frame="auto"
     )
+
     mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
-    xy, im = snapshot_brain_montage(fig, raw_ecog.info)
-    
-    
-    return amplitudes, latencies, sensor_colors
-    
+    xy, im = mne.viz.snapshot_brain_montage(fig, raw_ecog.info)
+
+def plot_ccep_latency(latencies, raw_ecog):
+    """
+    Function to plot the CCEP latency.
+    """
+    # convert to dataframe
+    latencies = pd.DataFrame(latencies)
+
+    # scale latency values to be between 0 and 1, then map to colors
+    latencies -= latencies.min()
+    latencies /= latencies.max()
+    rgba = colormaps.get_cmap("Blues_r")
+    sensor_colors = np.array(latencies.map(rgba).values.tolist(), float)
+    stim_color = np.array([[[1, 0.988, 0.216, 1]],
+                           [[1, 0.988, 0.216, 1]]]) # yellow
+    # Insert stimulation pair color at EPOCH_INDEX
+    sensor_colors = np.insert(sensor_colors, EPOCH_INDEX, stim_color, axis = 0)
+
+    # plot the brain with the electrode colors for latency
+    fig = mne.viz.plot_alignment(
+        raw_ecog.info,
+        trans="fsaverage",
+        subject="fsaverage",
+        subjects_dir=subjects_dir,
+        surfaces="pial",
+        show_axes=True,
+        ecog = True,
+        sensor_colors=sensor_colors,
+        coord_frame="auto"
+    )
+
+    mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
+    xy, im = mne.viz.snapshot_brain_montage(fig, raw_ecog.info)
+
+def plot_ccep_gamma(epochs, raw_ecog):
+    """ 
+    Function to plot the gamma power.
+    """
+    # Make a copy of the epoch to avoid modifying the original
+    selected_epoch = epochs[EPOCH_INDEX].copy()
+    # Extract gamma power    
+    gamma_power_t = selected_epoch.copy().filter(30, 90).apply_hilbert(envelope=True)
+    gamma_power_t = gamma_power_t.get_data().mean(axis=0)
+    gamma_power_at_15s = pd.DataFrame(gamma_power_t).loc[:,0]
+
+    # scale values to be between 0 and 1, then map to colors
+    gamma_power_at_15s -= gamma_power_at_15s.min()
+    gamma_power_at_15s /= gamma_power_at_15s.max()
+    rgba = colormaps.get_cmap("viridis")
+    sensor_colors = np.array(gamma_power_at_15s.map(rgba).values.tolist(), float)
+    stim_color = np.array([[1, 0, 0, 1],
+                           [1, 0, 0, 1]]) # red
+    # Insert stimulation pair color at EPOCH_INDEX
+    sensor_colors = np.insert(sensor_colors, EPOCH_INDEX, stim_color, axis = 0)
+
+    fig = mne.viz.plot_alignment(
+        raw_ecog.info,
+        trans="fsaverage",
+        subject="fsaverage",
+        subjects_dir=subjects_dir,
+        surfaces="pial",
+        show_axes=True,
+        ecog = True,
+        sensor_colors=sensor_colors,
+        coord_frame="auto"
+    )
+
+    mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
+    xy, im = mne.viz.snapshot_brain_montage(fig, raw_ecog.info)
+
 def map_amplitude(epochs):
     """
     Function to map the amplitude of the CCEP response.
