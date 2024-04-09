@@ -5,11 +5,15 @@ converts power spectral densities (PSDs) to dB, and plots the PSD.
 """
 # Import necessary libraries
 import os
+import io
+import time
+import sys
 import mne
 from mne.epochs import Epochs
 import numpy as np
-from matplotlib import colormaps
+from matplotlib import axes, colormaps
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import pandas as pd
 import scipy
 from PIL import Image
@@ -28,16 +32,17 @@ sample_path = mne.datasets.sample.data_path()
 subjects_dir = sample_path / "subjects"
 
 # Stimulus pair index to analyze
-EPOCH_INDEX = "FC03-FC04"
+STIM_PAIR = "FC03-FC04"
 
 # Binary switches for plotting
 PLOT_RAW = False
 PLOT_ELECTRODES = False
 PLOT_EPOCHS = False
-PLOT_CCEP_AMPLITUDE = True
-PLOT_MOV_AMPLITUDE = False
-PLOT_CCEP_LATENCY = True
-PLOT_CCEP_GAMMA = True
+PLOT_PEAKS = False
+PLOT_CCEP_AMPLITUDE = False
+PLOT_MOV_AMPLITUDE = True # Computationally heavy
+PLOT_CCEP_LATENCY = False
+PLOT_CCEP_GAMMA = False
 
 def main():
     """
@@ -172,7 +177,6 @@ def plot_electrodes(raw_ecog):
         coord_frame="auto"
     )
     mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
-    xy, im = mne.viz.snapshot_brain_montage(fig, raw_ecog.info)
 
 def make_epochs(raw_ecog, events):
     """
@@ -204,13 +208,12 @@ def make_epochs(raw_ecog, events):
     events_ccep = events_ccep.values.astype(int)
 
     epoch = Epochs(raw_ecog, events_ccep, event_id=event_id, tmin=-2, tmax=2,
-                   baseline=None, preload=True)
+                   baseline=None, preload=True, verbose=False)
     evoked = {site: epoch[site].average() for site in event_id.keys()}
-    
+
     # apply baseline correction for every evoked in evoked
     for site in evoked:
         evoked[site].apply_baseline(baseline = (None, -0.1), verbose = False)
-
     return evoked
 
 def plot_epochs(evoked):
@@ -218,14 +221,14 @@ def plot_epochs(evoked):
     Function to plot the epochs.
     """
     # Plot the epochs
-    evoked[EPOCH_INDEX].plot(block=True, title="Epochs")
+    evoked[STIM_PAIR].plot(block=True, title="Epochs")
 
 def find_ccep_peaks(evoked):
     """
     Function to find the peaks of the CCEP response.
     """
     # Extract CCEP amplitudes
-    selected_epoch = evoked[EPOCH_INDEX].copy()
+    selected_epoch = evoked[STIM_PAIR].copy()
     amplitudes = []
     latencies = []
 
@@ -236,10 +239,11 @@ def find_ccep_peaks(evoked):
             epoch_sd = 50/1000000
         amplitudes_index, _ = scipy.signal.find_peaks(epoch_data,
                                                    distance= 200)
-        plt.plot(epoch_data)
-        plt.plot(amplitudes_index, epoch_data[amplitudes_index], "x")
-        plt.plot(np.zeros_like(epoch_data), "--", color="gray")
-        plt.show()
+        if PLOT_PEAKS:
+            plt.plot(epoch_data)
+            plt.plot(amplitudes_index, epoch_data[amplitudes_index], "x")
+            plt.plot(np.zeros_like(epoch_data), "--", color="gray")
+            plt.show()
         # If the peak is at the beginning or end of the epoch, make amplitude 0
         if amplitudes_index == 0 or amplitudes_index == len(epoch_data)-1:
             amplitude = 0
@@ -247,12 +251,15 @@ def find_ccep_peaks(evoked):
             amplitude = epoch_data[amplitudes_index]
         # Print if amplitude is below threshold
         if amplitude < 2.6*epoch_sd:
-            print(f'Channel {channels} has an amplitude of {amplitude} which is below the threshold of {epoch_sd*2.6}')
+            if PLOT_PEAKS:
+                print(f'Channel {channels} has an amplitude of {amplitude} which is below the threshold of {epoch_sd*2.6}')
         else:
-            print('Amplitude correct')
+            if PLOT_PEAKS:
+                print('Amplitude correct')
         # add 2 seconds to account for measurement window
-        latency = selected_epoch.times[amplitudes_index] + 2  
-        print(f'Channel {channels} has a peak at {latency} seconds with an amplitude of {amplitude}')
+        latency = selected_epoch.times[amplitudes_index] + 2
+        if PLOT_PEAKS:
+            print(f'Channel {channels} has a peak at {latency} seconds with an amplitude of {amplitude}')
         amplitudes.append(amplitude)
         latencies.append(latency)
 
@@ -266,7 +273,7 @@ def plot_ccep_amplitude(amplitudes, raw_ecog):
     amplitudes = pd.DataFrame(amplitudes)
 
     # Get index of stim_pair in raw_ecog
-    stim_pair= EPOCH_INDEX.split('-')
+    stim_pair= STIM_PAIR.split('-')
     stim_indices = [i for i, s in enumerate(raw_ecog.ch_names) 
                     if stim_pair[0] in s or stim_pair[1] in s]
 
@@ -296,51 +303,63 @@ def plot_ccep_amplitude(amplitudes, raw_ecog):
     )
 
     mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
-    xy, im = mne.viz.snapshot_brain_montage(fig, raw_ecog.info)
 
 def plot_mov_amplitude(evoked, raw_ecog):
     """
     Function to plot the CCEP amplitude over time.
     """
     # Extract CCEP amplitudes
-    selected_epoch = evoked[EPOCH_INDEX].copy()
-    selected_epoch = selected_epoch.crop(tmin = -0.1, tmax = 0.2)
+    tmin = -0.1
+    tmax = 0.2
+    selected_epoch = evoked[STIM_PAIR].copy()
+    selected_epoch = selected_epoch.crop(tmin = tmin, tmax = tmax)
     all_amplitudes = []
     images = []
 
+    # Get index of stim_pair in raw_ecog
+    stim_pair= STIM_PAIR.split('-')
+    stim_indices = [i for i, s in enumerate(raw_ecog.ch_names) 
+                    if stim_pair[0] in s or stim_pair[1] in s]    
+
     for samples in range(len(selected_epoch.times)):
-        print('Sample:', samples, 'of', len(selected_epoch.times))
+        # Progress bar
+        j = (samples + 1) / len(selected_epoch.times)
+        sys.stdout.write('\r')
+        sys.stdout.write("Calculating sample amplitudes: [%-20s] %d%% " % ('='*int(20*j), 100*j))
+        sys.stdout.flush()
+
+        # print('Calculating sample amplitude:', samples, 'of', len(selected_epoch.times))
         # Determine the amplitude of the CCEP response
-        amplitudes = list()
+        amplitudes = []
         for channels in range(len(selected_epoch.ch_names)):
             # print('Channel:', channels, 'of', len(selected_epoch.ch_names))
-            selected_epoch = selected_epoch.copy().get_data(picks=[channels])
-            if samples < len(selected_epoch):
-                amplitude = selected_epoch[samples]
+            epoch_data = selected_epoch.copy().get_data(picks=[channels])
+            if samples < len(epoch_data):
+                amplitude = epoch_data[samples]
                 amplitudes.append(amplitude)
-        all_amplitudes.extend(amplitudes)
-
+        non_stim_amplitudes = [amplitudes[i] for i in range(len(amplitudes)) if i not in stim_indices]
+        all_amplitudes.extend(non_stim_amplitudes)
+    print('Done!')
     # Normalize all amplitudes
     all_amplitudes = pd.DataFrame(all_amplitudes)
     all_amplitudes -= all_amplitudes.min()
     all_amplitudes /= all_amplitudes.max()
 
     # Map all amplitudes to colors
-    vmin = np.percentile(all_amplitudes, 1)
-    vmax = np.percentile(all_amplitudes, 99)
     rgba = colormaps.get_cmap("RdBu_r")
-    all_colors = np.array(all_amplitudes.map(lambda x: rgba((x - vmin) / (vmax - vmin))).values.tolist(), float)
-
+    all_colors = np.array(all_amplitudes.map(rgba).values.tolist(),float)
+    stim_color = np.array([1, 1, 0, 1]) # yellow
+    
     for samples in range(len(selected_epoch.times)):
-        print('Plotting sample:', samples, 'of', len(selected_epoch.times))
-        # Get the colors for the current sample
-        sensor_colors = all_colors[samples * len(selected_epoch.ch_names):(samples + 1) * len(selected_epoch.ch_names)]
+        # Progress bar
+        j = (samples + 1) / len(selected_epoch.times)
+        sys.stdout.write('\r')
+        sys.stdout.write("Plotting samples: [%-20s] %d%% " % ('='*int(20*j), 100*j))
+        sys.stdout.flush()
 
-        # stim_color = np.array([[[1, 0.988, 0.216, 1]],
-        #                     [[1, 0.988, 0.216, 1]]]) # yellow
-        # # Insert stimulation pair color at EPOCH_INDEX
-        # sensor_colors = np.insert(sensor_colors, EPOCH_INDEX, stim_color, axis = 0)
-
+        sensor_colors = all_colors[:, samples, :]
+        for stim_index in stim_indices:
+            sensor_colors = np.insert(sensor_colors, stim_index, stim_color, axis=0)
         # plot the brain with the electrode colors for amplitude
         fig = mne.viz.plot_alignment(
             raw_ecog.info,
@@ -358,15 +377,36 @@ def plot_mov_amplitude(evoked, raw_ecog):
         fig.plotter.off_screen = True
         mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
         xy, im = mne.viz.snapshot_brain_montage(fig, raw_ecog.info)
-        pil_im = Image.fromarray(im)
-        images.append(pil_im)
-        # remove variable amplitude
         mne.viz.close_3d_figure(fig)
 
+        # Plot the CCEP amplitude over time
+        gs = gridspec.GridSpec(2, 1, height_ratios=[5, 1])
+        ccep_figure = plt.figure(figsize=(10, 10))
+        axis_0 = plt.subplot(gs[0])
+        axis_0.imshow(im)
+        axis_1 = plt.subplot(gs[1])
+        selected_epoch.plot(exclude=[stim_pair[0], stim_pair[1]], axes=axis_1, show=False)
+        axis_1.axvline(x=samples*(1/2048)+tmin)
+        axis_1.set_ylim(-500, 500)
+
+        io_buf = io.BytesIO()
+        ccep_figure.savefig(io_buf, format='raw')
+        io_buf.seek(0)
+        fig_data = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
+                            newshape=(int(ccep_figure.bbox.bounds[3]), int(ccep_figure.bbox.bounds[2]), -1))
+        io_buf.close()
+
+        pil_im = Image.fromarray(fig_data)
+        images.append(pil_im)
+        plt.close(ccep_figure)
+
+    print('Done!')
+    print('Creating GIF...')
     image_one = images[0]
     os.chdir(r"C:\Users\jjbte\OneDrive\Documenten\TM3\Afstuderen\CCEP_GIF")
-    image_one.save(f"CCEP_{EPOCH_INDEX}.gif", format="GIF", append_images=images[1:],
+    image_one.save(f"CCEP_{SUBJECT}_{SESSION}_{RUN}_{STIM_PAIR}.gif", format="GIF", append_images=images[1:],
                    save_all=True, duration=100, loop=0)
+    print('GIF created!')
     del images, image_one, pil_im, im, xy, fig, all_colors, all_amplitudes
 
 def plot_ccep_latency(latencies, raw_ecog):
@@ -377,8 +417,8 @@ def plot_ccep_latency(latencies, raw_ecog):
     latencies = pd.DataFrame(latencies)
 
     # Get index of stim_pair in raw_ecog
-    stim_pair= EPOCH_INDEX.split('-')
-    stim_indices = [i for i, s in enumerate(raw_ecog.ch_names) 
+    stim_pair= STIM_PAIR.split('-')
+    stim_indices = [i for i, s in enumerate(raw_ecog.ch_names)
                     if stim_pair[0] in s or stim_pair[1] in s]
 
     # scale latency values to be between 0 and 1, then map to colors
@@ -388,7 +428,7 @@ def plot_ccep_latency(latencies, raw_ecog):
     rgba = colormaps.get_cmap("Blues_r")
     sensor_colors = np.array(non_stim_latencies.map(rgba).values.tolist(), float)
     stim_color = np.array([1, 1, 0, 1]) # yellow
-    
+
     # Insert stimulation pair color at EPOCH_INDEX
     for stim_index in stim_indices:
         sensor_colors = np.insert(sensor_colors, stim_index, stim_color, axis=0)
@@ -407,21 +447,20 @@ def plot_ccep_latency(latencies, raw_ecog):
     )
 
     mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
-    xy, im = mne.viz.snapshot_brain_montage(fig, raw_ecog.info)
 
 def plot_ccep_gamma(evoked, raw_ecog):
     """ 
     Function to plot the gamma power.
     """
     # Make a copy of the epoch to avoid modifying the original
-    gamma_power_t = (evoked[EPOCH_INDEX].copy().filter(30, 90).apply_hilbert(envelope=True))
+    gamma_power_t = (evoked[STIM_PAIR].copy().filter(30, 90).apply_hilbert(envelope=True))
     gamma_power_at_15s = gamma_power_t.to_data_frame(index="time").loc[0]
     print(gamma_power_at_15s)
-    
-    stim_pair= EPOCH_INDEX.split('-')
+
+    stim_pair= STIM_PAIR.split('-')
     stim_indices = [i for i, s in enumerate(raw_ecog.ch_names) 
                     if stim_pair[0] in s or stim_pair[1] in s]
-    
+
     # scale values to be between 0 and 1, then map to colors
     non_stim_gamma = gamma_power_at_15s.drop(stim_pair)
     non_stim_gamma -= non_stim_gamma.min()
@@ -429,7 +468,7 @@ def plot_ccep_gamma(evoked, raw_ecog):
     rgba = colormaps.get_cmap("viridis")
     sensor_colors = np.array(non_stim_gamma.map(rgba).tolist(), float)
     stim_color = np.array([1, 0, 0, 1]) # Red
-    
+
     # Insert stimulation pair color at EPOCH_INDEX
     for stim_index in stim_indices:
         sensor_colors = np.insert(sensor_colors, stim_index, stim_color, axis=0)
@@ -447,9 +486,13 @@ def plot_ccep_gamma(evoked, raw_ecog):
     )
 
     mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
-    xy, im = mne.viz.snapshot_brain_montage(fig, raw_ecog.info)
 
 if __name__ == "__main__":
+    st = time.time()
     main()
-
+    print("CCEP analysis completed!")
+    et = time.time()
+    res = et-st
+    res_min = res // 60
+    print(f"Time taken: {res_min} minutes")
 # End of file
