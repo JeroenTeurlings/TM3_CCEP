@@ -40,11 +40,11 @@ STIM_PAIR = "FC03-FC04"
 PLOT_RAW = False
 PLOT_ELECTRODES = False
 PLOT_ELECTRODES_GIF = False
-PLOT_EPOCHS = True
+PLOT_EPOCHS = False
 PLOT_PEAKS = False
 BINARIZE_PEAKS = False
 PLOT_CCEP_AMPLITUDE = False
-PLOT_MOV_AMPLITUDE = False # Computational heavy
+PLOT_MOV_AMPLITUDE = True # Computational heavy
 PLOT_CCEP_LATENCY = False
 PLOT_CCEP_GAMMA = False
 PLOT_MOV_GAMMA = False # Computational heavy
@@ -393,9 +393,9 @@ def plot_mov_amplitude(evoked, raw_ecog):
     all_amplitudes = []
     frames = []
     thresh = 2.6*50/1000000
-    stim_pair= STIM_PAIR.split('-')
+    stim_pair= STIM_PAIR.split('-') + ['FC02']
     stim_indices = [i for i, s in enumerate(raw_ecog.ch_names)
-                    if stim_pair[0] in s or stim_pair[1] in s]
+                    if stim_pair[0] in s or stim_pair[1] in s or stim_pair[2] in s]
     stim_color = np.array([1, 1, 0, 1]) # yellow
     rgba = colormaps.get_cmap("seismic")
 
@@ -456,7 +456,7 @@ def plot_mov_amplitude(evoked, raw_ecog):
         axis_0 = plt.subplot(gs[0])
         axis_0.imshow(im)
         axis_1 = plt.subplot(gs[1])
-        selected_epoch.plot(exclude=[stim_pair[0], stim_pair[1]], axes=axis_1, show=False)
+        selected_epoch.plot(exclude=[stim_pair[0], stim_pair[1], stim_pair[2]], axes=axis_1, show=False)
         axis_1.axvline(x=samples*(1/SFREQ)+tmin)
         axis_1.set_ylim(-500, 500)
         if BINARIZE_PEAKS:
@@ -480,7 +480,7 @@ def plot_mov_amplitude(evoked, raw_ecog):
     print('Creating GIF...')
     image_one = frames[0]
     os.chdir(r"C:\Users\jjbte\OneDrive\Documenten\TM3\Afstuderen\CCEP_GIF")
-    image_one.save(f"{SUBJECT}_{SESSION}_{RUN}_{STIM_PAIR}_binarized.gif", format="GIF",
+    image_one.save(f"{SUBJECT}_{SESSION}_{RUN}_{STIM_PAIR}_binarized_test.gif", format="GIF",
                    append_images=frames[1:],
                    save_all=True, duration=100, loop=0)
     print('GIF created!')
