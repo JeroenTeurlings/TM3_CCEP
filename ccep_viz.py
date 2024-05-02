@@ -19,6 +19,7 @@ import pandas as pd
 import scipy
 from scipy.stats.mstats import winsorize
 from PIL import Image
+from pathlib import Path
 
 # Global settings for plotting
 mne.viz.set_3d_backend('pyvista')
@@ -44,7 +45,7 @@ PLOT_EPOCHS = False
 PLOT_PEAKS = False
 BINARIZE_PEAKS = False
 PLOT_CCEP_AMPLITUDE = False
-PLOT_MOV_AMPLITUDE = True # Computational heavy
+PLOT_MOV_AMPLITUDE = False # Computational heavy
 PLOT_CCEP_LATENCY = False
 PLOT_CCEP_GAMMA = False
 PLOT_MOV_GAMMA = False # Computational heavy
@@ -76,7 +77,7 @@ def main():
     if PLOT_EPOCHS:
         plot_epochs(epoch)
     # Find the peaks of the CCEP response
-    amplitudes, latencies = find_ccep_peaks(evoked)
+    amplitudes, latencies = find_ccep_peaks(evoked, electrodes)
     # Plot the CCEP amplitude
     if PLOT_CCEP_AMPLITUDE:
         plot_ccep_amplitude(amplitudes, raw_ecog)
@@ -92,6 +93,8 @@ def main():
     # Plot gamma power over time    
     if PLOT_MOV_GAMMA:
         plot_mov_gamma(evoked, raw_ecog)
+    # Display the total significant electrode activity on a brain
+    total_activity(raw_ecog)
 
 def load_data():
     """
@@ -208,8 +211,8 @@ def plot_electrodes(raw_ecog):
                             focalpoint="auto",
                             distance="auto")
             screenshots.append(Image.fromarray(brain.screenshot(mode="rgb", time_viewer=True)))
-     
-        os.chdir(r"C:\Users\jjbte\OneDrive\Documenten\TM3\Afstuderen\CCEP_GIF")
+
+        os.chdir(r"C:\Users\jjbte\Documents\TM3\Afstuderen\CCEP_GIF")
         screenshots[0].save("Electrodes_annot.gif", format="GIF",
                     append_images=screenshots[1:],
                     save_all=True, duration=50, loop=0)
@@ -262,58 +265,80 @@ def plot_epochs(epoch):
     # Plot the epochs
     epoch[STIM_PAIR].plot(block=True, title="Epochs")
 
-def find_ccep_peaks(evoked):
+def find_ccep_peaks(evoked, electrodes):
     """
     Function to find the peaks of the CCEP response.
     """
     # Extract CCEP amplitudes
-    selected_epoch = evoked[STIM_PAIR].copy()
-    amplitudes = []
-    latencies = []
+    for stim_pair in evoked:
+        selected_epoch = evoked[stim_pair].copy()
+        amplitudes = []
+        latencies = []
+        significant_electrodes = []
 
-    for channels in range(len(selected_epoch.ch_names)):
-        epoch_sd = np.std(selected_epoch.get_data(picks=[channels], tmin=-2, tmax=-0.1))
-        if epoch_sd < 50/1000000:
-            epoch_sd = 50/1000000
-        epoch_data = selected_epoch.get_data(picks=[channels],
-                                             tmin=0.009,
-                                             tmax=0.100).squeeze()*-1 # Invert data for N1 peak
-        amplitudes_index, _ = scipy.signal.find_peaks(epoch_data,
-                                                      distance= 200, # To prevent multiple peaks
-                                                      height = 2.6 * epoch_sd,
-                                                      prominence = 20/1000000,)
-        # If index is empty (no peaks are found), set amplitude to 0
-        if amplitudes_index.size == 0:
-            amplitude = np.array([0])
-            latency = np.array([0])
-        else:
-            amplitude = epoch_data[amplitudes_index]
-            # add 2 seconds to account for measurement window
-            latency = selected_epoch.times[amplitudes_index] + 2
+        for channels, e in enumerate(selected_epoch.ch_names):
+            epoch_sd = np.std(selected_epoch.get_data(picks=[channels], tmin=-2, tmax=-0.1))
+            if epoch_sd < 50/1000000:
+                epoch_sd = 50/1000000
+            epoch_data = selected_epoch.get_data(picks=[channels],
+                                                tmin=0.009,
+                                                tmax=0.100).squeeze()*-1 # Invert data for N1 peak
+            amplitudes_index, _ = scipy.signal.find_peaks(epoch_data,
+                                                        distance= 200, # To prevent multiple peaks
+                                                        height = 2.6 * epoch_sd,
+                                                        prominence = 20/1000000,)
+            # If index is empty (no peaks are found), set amplitude to 0
+            if amplitudes_index.size == 0:
+                amplitude = np.array([0])
+                latency = np.array([0])
+            else:
+                amplitude = epoch_data[amplitudes_index]
+                # add 2 seconds to account for measurement window
+                latency = selected_epoch.times[amplitudes_index] + 2
 
-        if PLOT_PEAKS:
-            plt.plot(epoch_data)
-            plt.plot(amplitudes_index, epoch_data[amplitudes_index], "x")
-            plt.plot(np.zeros_like(epoch_data), "--", color="gray")
-            plt.show()
-            # Print if amplitude is below threshold
-            if amplitude < 2.6 * epoch_sd and amplitude > 0:
+            if amplitude > 2.6 * epoch_sd:
+                channel_name = selected_epoch.ch_names[channels]
+                x_coordinate = electrodes[electrodes['name'] == channel_name]['x'].values[0]
+                y_coordinate = electrodes[electrodes['name'] == channel_name]['y'].values[0]
+                z_coordinate = electrodes[electrodes['name'] == channel_name]['z'].values[0]
+                significant_electrode = {
+                    'channel_name': channel_name,
+                    'x_coordinate': x_coordinate,
+                    'y_coordinate': y_coordinate,
+                    'z_coordinate': z_coordinate,
+                }
+                significant_electrodes.append(significant_electrode)
+
+            if PLOT_PEAKS:
+                plt.plot(epoch_data)
+                plt.plot(amplitudes_index, epoch_data[amplitudes_index], "x")
+                plt.plot(np.zeros_like(epoch_data), "--", color="gray")
+                plt.show()
+                # Print if amplitude is below threshold
+                if amplitude < 2.6 * epoch_sd and amplitude > 0:
                     print(f'Channel {channels} has an amplitude of {amplitude}'
                         f' which is below the threshold of {epoch_sd*2.6}')
-            elif amplitude > 2.6 * epoch_sd:
+                elif amplitude > 2.6 * epoch_sd:
                     print('Amplitude correct')
-            else:
-                print(f'Channel {channels} has no peak above the threshold')
-                continue
-            # Print peak information
-            print(f'Channel {channels} has a peak at {latency}'
-                  f' seconds with an amplitude of {amplitude}')
-        amplitudes.append(amplitude)
-        latencies.append(latency)
+                else:
+                    print(f'Channel {channels} has no peak above the threshold')
+                    continue
+                # Print peak information
+                print(f'Channel {channels} has a peak at {latency}'
+                    f' seconds with an amplitude of {amplitude}')
+            amplitudes.append(amplitude)
+            latencies.append(latency)
 
-    # Binarize the peaks
-    if BINARIZE_PEAKS:
-        amplitudes = np.where(np.array(amplitudes) > 0, 1, 0).squeeze()
+        # Save significant electrodes to a TSV file
+        Path(f"C:/Users/jjbte/Documents/TM3/Afstuderen/Significant_Electrodes/{SUBJECT}").mkdir(parents=True, exist_ok=True)
+        os.chdir(f"C:/Users/jjbte/Documents/TM3/Afstuderen/Significant_Electrodes/{SUBJECT}")
+        sig_elec_df = pd.DataFrame(significant_electrodes)
+        sig_elec_df.to_csv(f"{SUBJECT}_{SESSION}_{RUN}_{stim_pair}.tsv",
+                        sep='\t', index=False)
+
+        # Binarize the peaks
+        if BINARIZE_PEAKS:
+            amplitudes = np.where(np.array(amplitudes) > 0, 1, 0).squeeze()
 
     return amplitudes, latencies
 
@@ -393,21 +418,21 @@ def plot_mov_amplitude(evoked, raw_ecog):
     all_amplitudes = []
     frames = []
     thresh = 2.6*50/1000000
-    stim_pair= STIM_PAIR.split('-') + ['FC02']
+    stim_pair= STIM_PAIR.split('-')
     stim_indices = [i for i, s in enumerate(raw_ecog.ch_names)
-                    if stim_pair[0] in s or stim_pair[1] in s or stim_pair[2] in s]
+                    if stim_pair[0] in s or stim_pair[1] in s]
     stim_color = np.array([1, 1, 0, 1]) # yellow
     rgba = colormaps.get_cmap("seismic")
 
     ## Main loop
-    for samples in range(len(selected_epoch.times)):
+    for samples, e in enumerate(selected_epoch.times):
         # Progress bar
         progress_bar(samples, len(selected_epoch.times),
                      message = "Calculating sample amplitudes: ")
 
         amplitudes = []
         # Determine the amplitude of the CCEP response
-        for channels in range(len(selected_epoch.ch_names)):
+        for channels, el in enumerate(selected_epoch.ch_names):
             epoch_data = selected_epoch.copy().get_data(picks=[channels]).squeeze()
             if samples < len(epoch_data):
                 amplitude = epoch_data[samples]
@@ -433,7 +458,7 @@ def plot_mov_amplitude(evoked, raw_ecog):
         amp_normed = norm(all_amplitudes.values)
     all_colors = rgba(amp_normed)
 
-    for samples in range(len(selected_epoch.times)):
+    for samples, e in enumerate(selected_epoch.times):
         # Progress bar
         progress_bar(samples, len(selected_epoch.times), message = "Plotting samples: ")
 
@@ -456,7 +481,8 @@ def plot_mov_amplitude(evoked, raw_ecog):
         axis_0 = plt.subplot(gs[0])
         axis_0.imshow(im)
         axis_1 = plt.subplot(gs[1])
-        selected_epoch.plot(exclude=[stim_pair[0], stim_pair[1], stim_pair[2]], axes=axis_1, show=False)
+        selected_epoch.plot(exclude=[stim_pair[0], stim_pair[1]],
+                            axes=axis_1, show=False)
         axis_1.axvline(x=samples*(1/SFREQ)+tmin)
         axis_1.set_ylim(-500, 500)
         if BINARIZE_PEAKS:
@@ -479,7 +505,7 @@ def plot_mov_amplitude(evoked, raw_ecog):
     print('Done!')
     print('Creating GIF...')
     image_one = frames[0]
-    os.chdir(r"C:\Users\jjbte\OneDrive\Documenten\TM3\Afstuderen\CCEP_GIF")
+    os.chdir(r"C:\Users\jjbte\Documents\TM3\Afstuderen\CCEP_GIF")
     image_one.save(f"{SUBJECT}_{SESSION}_{RUN}_{STIM_PAIR}_binarized_test.gif", format="GIF",
                    append_images=frames[1:],
                    save_all=True, duration=100, loop=0)
@@ -616,10 +642,7 @@ def plot_mov_gamma(evoked, raw_ecog):
 
     for samples in range(len(epoch_gamma.times)):
         # Progress bar
-        j = (samples + 1) / len(epoch_gamma.times)
-        sys.stdout.write('\r')
-        sys.stdout.write("Plotting samples: [%-20s] %d%% " % ('='*int(20*j), 100*j))
-        sys.stdout.flush()
+        progress_bar(samples, len(epoch_gamma.times), message = "Plotting samples: ")
 
         sensor_colors = all_colors[:, samples, :]
         for stim_index in stim_indices:
@@ -668,12 +691,66 @@ def plot_mov_gamma(evoked, raw_ecog):
     print('Done!')
     print('Creating GIF...')
     image_one = images[0]
-    os.chdir(r"C:\Users\jjbte\OneDrive\Documenten\TM3\Afstuderen\CCEP_GIF")
+    os.chdir(r"C:\Users\jjbte\Documents\TM3\Afstuderen\CCEP_GIF")
     image_one.save(f"{SUBJECT}_{SESSION}_{RUN}_{STIM_PAIR}_GAMMA.gif",
                    format="GIF", append_images=images[1:],
                    save_all=True, duration=100, loop=0)
     print('GIF created!')
     del images, image_one, pil_im, im, xy, fig, all_colors, all_gamma
+
+def total_activity(raw_ecog):
+    ## Display the total significant electrode activity on a brain
+    # Run ccep_connectivity.py to get the channel_name_counts.tsv file
+    file_path = "C:/Users/jjbte/Documents/TM3/Afstuderen/TM3_CCEP/ccep_connectivity.py"
+    try:
+      os.system(f'python {file_path}')
+    except FileNotFoundError:
+      print(f"Error: The file '{file_path}' does not exist.")
+    
+    ## Initialize variables
+    os.chdir(f"C:/Users/jjbte/Documents/TM3/Afstuderen/Significant_Electrodes/{SUBJECT}")
+    cwd = os.getcwd()
+    rgba = colormaps.get_cmap("Reds")
+    channel_count = pd.DataFrame(pd.read_csv(cwd +"/output/channel_name_counts.tsv", sep='\t'))
+
+    ## Initialize brain
+    Brain = mne.viz.get_brain_class()
+    brain = Brain("fsaverage",
+                  hemi="both",
+                  surf="pial",
+                  cortex="grey",
+                  subjects_dir=subjects_dir,
+                  background="white",
+                  interaction="terrain",
+                  show=True)
+    brain.add_annotation("aparc.a2009s",
+                         borders=False,
+                         alpha=ALPHA) # Make the annotation transparent or not
+    brain.show_view(azimuth=180, elevation=90, focalpoint="auto", distance="auto")
+    
+    # Check if all electrodes in montage are present in the channel_count dataframe
+    for electrode in raw_ecog.ch_names:
+        if electrode not in channel_count['channel_name'].values:
+            channel_count = pd.concat([channel_count, pd.DataFrame({'channel_name': [electrode], 'count': [0]})],
+                                      ignore_index=True)
+            print(f"Empty electrode {electrode} appended")
+        else:
+            continue
+    # Normalize the counts
+    channel_count['count'] = channel_count['count'] / channel_count['count'].max()
+    # Order the channel_count dataframe so it is in the same order as the raw_ecog
+    channel_count = channel_count.set_index('channel_name').reindex(raw_ecog.ch_names).reset_index()
+    print(channel_count)
+    
+    # Map counts to colors
+    sensor_colors = np.array(channel_count['count'].map(rgba).values.tolist(), float)
+        
+    ## Add sensors to the brain
+    brain.add_sensors(raw_ecog.info,
+                      trans="fsaverage",
+                      ecog = True,
+                      sensor_colors=sensor_colors)
+    
 
 def progress_bar(samples, total_samples, message = ""):
     """
