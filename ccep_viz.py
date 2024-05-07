@@ -8,7 +8,9 @@ import os
 import io
 import time
 import sys
+from pathlib import Path
 import mne
+import mne_connectivity
 from mne.epochs import Epochs
 import numpy as np
 from matplotlib import colormaps
@@ -19,23 +21,25 @@ import pandas as pd
 import scipy
 from scipy.stats.mstats import winsorize
 from PIL import Image
-from pathlib import Path
+
+# Import custom modules
+import ccep_connectivity
 
 # Global settings for plotting
 mne.viz.set_3d_backend('pyvista')
 
 # Define the subject, session, task, and run
-SUBJECT = 'sub-ccepAgeUMCU02'
+SUBJECT = 'sub-ccepAgeUMCU10'
 SESSION = 'ses-1'
 TASK = 'task-SPESclin'
-RUN = 'run-021804'
+RUN = 'run-031402'
 
 # paths to mne datasets - FreeSurfer subject
 sample_path = mne.datasets.sample.data_path()
 subjects_dir = sample_path / "subjects"
 
 # Stimulus pair index to analyze
-STIM_PAIR = "FC03-FC04"
+STIM_PAIR = "FC01-FC02"
 
 # Binary switches for plotting
 PLOT_RAW = False
@@ -49,9 +53,8 @@ PLOT_MOV_AMPLITUDE = False # Computational heavy
 PLOT_CCEP_LATENCY = False
 PLOT_CCEP_GAMMA = False
 PLOT_MOV_GAMMA = False # Computational heavy
+TOTAL_ACTIVITY = True
 ALPHA = 0.0
-
-SFREQ = 2048
 
 def main():
     """
@@ -94,7 +97,8 @@ def main():
     if PLOT_MOV_GAMMA:
         plot_mov_gamma(evoked, raw_ecog)
     # Display the total significant electrode activity on a brain
-    total_activity(raw_ecog)
+    if TOTAL_ACTIVITY:
+        total_activity(raw_ecog, electrodes)
 
 def load_data():
     """
@@ -120,6 +124,8 @@ def load_data():
                            sep='\t')
     events = pd.read_csv(f'{SUBJECT}_{SESSION}_{TASK}_{RUN}_events.tsv', sep='\t')
     print(raw.info)
+    global SFREQ
+    SFREQ = raw.info['sfreq']
     return raw, electrodes, channels, events
 
 def plot_raw(raw):
@@ -263,7 +269,8 @@ def plot_epochs(epoch):
     Function to plot the epochs.
     """
     # Plot the epochs
-    epoch[STIM_PAIR].plot(block=True, title="Epochs")
+    epoch[STIM_PAIR].plot(block = True, title="Epochs")
+    # epoch[STIM_PAIR].plot_image(title="Epochs", picks='FC09', ts_args={"ylim":{"ecog":[-500, 500]}})
 
 def find_ccep_peaks(evoked, electrodes):
     """
@@ -296,7 +303,7 @@ def find_ccep_peaks(evoked, electrodes):
                 # add 2 seconds to account for measurement window
                 latency = selected_epoch.times[amplitudes_index] + 2
 
-            if amplitude > 2.6 * epoch_sd:
+            if amplitude > 2.6 * epoch_sd and TOTAL_ACTIVITY:
                 channel_name = selected_epoch.ch_names[channels]
                 x_coordinate = electrodes[electrodes['name'] == channel_name]['x'].values[0]
                 y_coordinate = electrodes[electrodes['name'] == channel_name]['y'].values[0]
@@ -310,9 +317,28 @@ def find_ccep_peaks(evoked, electrodes):
                 significant_electrodes.append(significant_electrode)
 
             if PLOT_PEAKS:
-                plt.plot(epoch_data)
-                plt.plot(amplitudes_index, epoch_data[amplitudes_index], "x")
-                plt.plot(np.zeros_like(epoch_data), "--", color="gray")
+                epoch_data_plot = selected_epoch.get_data(picks=[channels],
+                                                tmin=-0.050,
+                                                tmax=0.100).squeeze()
+                time_steps = np.linspace(-0.050, 0.100, epoch_data_plot.size)
+                # Calculate the number of samples
+                num_samples = int((0.009 - -0.050) * SFREQ)
+                amplitudes_index = amplitudes_index + num_samples
+                amplitudes_times = time_steps[amplitudes_index]
+                plt.xlabel('Time (s)')
+                plt.ylabel('Amplitude (V)')
+                plt.plot(time_steps, epoch_data_plot, color='silver')
+                plt.plot(time_steps[int(0.059*SFREQ):],
+                        epoch_data_plot[int(0.059*SFREQ):],
+                        color='black')
+                plt.plot(amplitudes_times, epoch_data_plot[amplitudes_index], "x", color='r')
+                plt.axhline(y = 0, linestyle = "-", color="black")
+                plt.axvline(x=0, color='black', linestyle='-')
+                plt.ylim(-0.0005, 0.0005)
+                plt.xlim(-0.050, 0.100)
+                plt.axhline(y=(2.6 * epoch_sd), color='r', linestyle='--')
+                plt.axhline(y=-(2.6 * epoch_sd), color='r', linestyle='--')
+                plt.axvline(x=0.009, color='black', linestyle='dotted')
                 plt.show()
                 # Print if amplitude is below threshold
                 if amplitude < 2.6 * epoch_sd and amplitude > 0:
@@ -329,12 +355,14 @@ def find_ccep_peaks(evoked, electrodes):
             amplitudes.append(amplitude)
             latencies.append(latency)
 
-        # Save significant electrodes to a TSV file
-        Path(f"C:/Users/jjbte/Documents/TM3/Afstuderen/Significant_Electrodes/{SUBJECT}").mkdir(parents=True, exist_ok=True)
-        os.chdir(f"C:/Users/jjbte/Documents/TM3/Afstuderen/Significant_Electrodes/{SUBJECT}")
-        sig_elec_df = pd.DataFrame(significant_electrodes)
-        sig_elec_df.to_csv(f"{SUBJECT}_{SESSION}_{RUN}_{stim_pair}.tsv",
-                        sep='\t', index=False)
+        if TOTAL_ACTIVITY:
+            # Save significant electrodes to a TSV file
+            path = f"C:/Users/jjbte/Documents/TM3/Afstuderen/Significant_Electrodes/{SUBJECT}"
+            Path(path).mkdir(parents=True, exist_ok=True)
+            os.chdir(path)
+            sig_elec_df = pd.DataFrame(significant_electrodes)
+            sig_elec_df.to_csv(f"{SUBJECT}_{SESSION}_{RUN}_{stim_pair}.tsv",
+                            sep='\t', index=False)
 
         # Binarize the peaks
         if BINARIZE_PEAKS:
@@ -393,8 +421,8 @@ def plot_mov_amplitude(evoked, raw_ecog):
     """
     ## Initialize variables
     # Initialize brain
-    Brain = mne.viz.get_brain_class()
-    brain = Brain("fsaverage",
+    brain_amplitude = mne.viz.get_brain_class()
+    brain = brain_amplitude("fsaverage",
                   hemi="both",
                   surf="pial",
                   cortex="grey",
@@ -601,33 +629,53 @@ def plot_mov_gamma(evoked, raw_ecog):
     '''
     Function to plot the gamma power over time.
     '''
-    # Extract CCEP gamma power
+    ## Initialize variables
+    # Initialize brain
+    brain_gamma = mne.viz.get_brain_class()
+    brain = brain_gamma("fsaverage",
+                  hemi="both",
+                  surf="pial",
+                  cortex="grey",
+                  subjects_dir=subjects_dir,
+                  background="white",
+                  interaction="terrain",
+                  show=True)
+    brain.show_view(azimuth=180,
+                    elevation=90,
+                    focalpoint="auto",
+                    distance="auto")
+    brain.add_annotation("aparc.a2009s",
+                            borders=False,
+                            alpha=ALPHA,
+                            remove_existing=True)
+    # Initialize variables
     tmin = -0.1
     tmax = 0.2
+    all_gamma = []
+    images = []
     selected_epoch = evoked[STIM_PAIR].copy()
     selected_epoch = selected_epoch.crop(tmin = tmin, tmax = tmax)
     epoch_gamma = (selected_epoch.copy().filter(30, 90).apply_hilbert(envelope=True))
-    all_gamma = []
-    images = []
-
-    # Get index of stim_pair in raw_ecog
+    stim_color = np.array([1, 0, 0, 1]) # Red
+    rgba = colormaps.get_cmap("viridis")
     stim_pair= STIM_PAIR.split('-')
     stim_indices = [i for i, s in enumerate(raw_ecog.ch_names)
                     if stim_pair[0] in s or stim_pair[1] in s]
 
-    for samples in range(len(epoch_gamma.times)):
+    ## Main loop
+    for samples, e in enumerate(epoch_gamma.times):
         # Progress bar
         progress_bar(samples, len(epoch_gamma.times),
                      message = "Calculating sample gamma power: ")
 
         # Determine the amplitude of the CCEP response
         gammas = []
-        for channels in range(len(epoch_gamma.ch_names)):
+        for channels, e1 in enumerate(epoch_gamma.ch_names):
             gamma_data = epoch_gamma.copy().get_data(picks=[channels])
             if samples < len(gamma_data):
                 gamma = gamma_data[samples]
                 gammas.append(gamma)
-        non_stim_gamma = [gammas[i] for i in range(len(gammas)) if i not in stim_indices]
+        non_stim_gamma = [gammas[i] for i, e2 in enumerate(gammas) if i not in stim_indices]
         all_gamma.extend(non_stim_gamma)
     print('Done!')
 
@@ -635,12 +683,10 @@ def plot_mov_gamma(evoked, raw_ecog):
     all_gamma = pd.DataFrame(all_gamma)
     all_gamma_norm = 2 * (all_gamma - all_gamma.min()) \
                           / (all_gamma.max() - all_gamma.min()) - 1
-    # Map all gamma to colors
-    rgba = colormaps.get_cmap("viridis")
+    # Map all gamma to colors    
     all_colors = np.array(all_gamma_norm.map(rgba).values.tolist(),float)
-    stim_color = np.array([1, 0, 0, 1]) # Red
 
-    for samples in range(len(epoch_gamma.times)):
+    for samples, e in enumerate(epoch_gamma.times):
         # Progress bar
         progress_bar(samples, len(epoch_gamma.times), message = "Plotting samples: ")
 
@@ -648,24 +694,14 @@ def plot_mov_gamma(evoked, raw_ecog):
         for stim_index in stim_indices:
             sensor_colors = np.insert(sensor_colors, stim_index, stim_color, axis=0)
 
-        # plot the brain with the electrode colors for gamma power
-        fig = mne.viz.plot_alignment(
-            raw_ecog.info,
-            trans="fsaverage",
-            subject="fsaverage",
-            subjects_dir=subjects_dir,
-            surfaces="pial",
-            show_axes=True,
-            ecog = True,
-            sensor_colors=sensor_colors,
-            coord_frame="auto",
-            verbose = False
-        )
-        # Set off_screen to True
-        fig.plotter.off_screen = True
-        mne.viz.set_3d_view(fig, azimuth=180, elevation=90, focalpoint="auto", distance="auto")
-        xy, im = mne.viz.snapshot_brain_montage(fig, raw_ecog.info)
-        mne.viz.close_3d_figure(fig)
+        # plot the brain with the electrode colors for amplitude
+        brain.add_sensors(raw_ecog.info,
+                        trans="fsaverage",
+                        ecog = True,
+                        sensor_colors=sensor_colors,
+                        verbose = False)
+        im = brain.screenshot(mode="rgb")
+        brain.remove_sensors(kind=None)
 
         # Plot the CCEP gamma over time
         gs = gridspec.GridSpec(2, 1, height_ratios=[5, 1])
@@ -674,7 +710,7 @@ def plot_mov_gamma(evoked, raw_ecog):
         axis_0.imshow(im)
         axis_1 = plt.subplot(gs[1])
         epoch_gamma.plot(exclude=[stim_pair[0], stim_pair[1]], axes=axis_1, show=False)
-        axis_1.axvline(x=samples*(1/2048)+tmin)
+        axis_1.axvline(x=samples*(1/SFREQ)+tmin)
 
         io_buf = io.BytesIO()
         ccep_figure.savefig(io_buf, format='raw')
@@ -691,31 +727,39 @@ def plot_mov_gamma(evoked, raw_ecog):
     print('Done!')
     print('Creating GIF...')
     image_one = images[0]
-    os.chdir(r"C:\Users\jjbte\Documents\TM3\Afstuderen\CCEP_GIF")
+    os.chdir("C:/Users/jjbte/Documents/TM3/Afstuderen/CCEP_GIF")
     image_one.save(f"{SUBJECT}_{SESSION}_{RUN}_{STIM_PAIR}_GAMMA.gif",
                    format="GIF", append_images=images[1:],
                    save_all=True, duration=100, loop=0)
     print('GIF created!')
-    del images, image_one, pil_im, im, xy, fig, all_colors, all_gamma
+    del images, image_one, pil_im, im, all_colors, all_gamma
 
-def total_activity(raw_ecog):
+def total_activity(raw_ecog, electrodes):
+    '''
+    Display the total significant electrode activity on a brain.
+
+    Parameters:
+    raw_ecog (mne.io.Raw): The raw electrocorticography (ECoG) data.
+
+    Returns:
+    None
+    '''
+    os.chdir("C:/Users/jjbte/Documents/TM3/Afstuderen/TM3_CCEP")
     ## Display the total significant electrode activity on a brain
     # Run ccep_connectivity.py to get the channel_name_counts.tsv file
-    file_path = "C:/Users/jjbte/Documents/TM3/Afstuderen/TM3_CCEP/ccep_connectivity.py"
-    try:
-      os.system(f'python {file_path}')
-    except FileNotFoundError:
-      print(f"Error: The file '{file_path}' does not exist.")
-    
+    ccep_connectivity.SUBJECT = SUBJECT
+    ccep_connectivity.main()
+
     ## Initialize variables
     os.chdir(f"C:/Users/jjbte/Documents/TM3/Afstuderen/Significant_Electrodes/{SUBJECT}")
     cwd = os.getcwd()
     rgba = colormaps.get_cmap("Reds")
-    channel_count = pd.DataFrame(pd.read_csv(cwd +"/output/channel_name_counts.tsv", sep='\t'))
+    channel_count = pd.DataFrame(pd.read_csv(cwd +f"/output/{SUBJECT}_channel_name_counts.tsv",
+                                             sep='\t'))
 
     ## Initialize brain
-    Brain = mne.viz.get_brain_class()
-    brain = Brain("fsaverage",
+    brain_total = mne.viz.get_brain_class()
+    brain = brain_total("fsaverage",
                   hemi="both",
                   surf="pial",
                   cortex="grey",
@@ -727,30 +771,42 @@ def total_activity(raw_ecog):
                          borders=False,
                          alpha=ALPHA) # Make the annotation transparent or not
     brain.show_view(azimuth=180, elevation=90, focalpoint="auto", distance="auto")
-    
+
+    # Add xyz coordinates from electrodes to channel_count dataframe
+    # channel_count = channel_count.join(electrodes.set_index('name')[['x', 'y', 'z']], on='channel_name')
+
     # Check if all electrodes in montage are present in the channel_count dataframe
     for electrode in raw_ecog.ch_names:
         if electrode not in channel_count['channel_name'].values:
-            channel_count = pd.concat([channel_count, pd.DataFrame({'channel_name': [electrode], 'count': [0]})],
-                                      ignore_index=True)
+            x_coordinate = electrodes[electrodes['name'] == electrode]['x'].values[0]
+            y_coordinate = electrodes[electrodes['name'] == electrode]['y'].values[0]
+            z_coordinate = electrodes[electrodes['name'] == electrode]['z'].values[0]
+            channel_count = pd.concat([channel_count,
+                                       pd.DataFrame({'channel_name': [electrode],
+                                                     'x': [x_coordinate],
+                                                     'y': [y_coordinate],
+                                                     'z': [z_coordinate],
+                                                     'count': [0]})],
+                                       ignore_index=True)
             print(f"Empty electrode {electrode} appended")
-        else:
+        else:        
             continue
+    # Save appended channel_count dataframe
+    path = 'C:/Users/jjbte/Documents/TM3/Afstuderen/Significant_Electrodes/total_activity/'
+    channel_count.to_csv(path + f"{SUBJECT}_output.tsv", sep='\t', index=False)
     # Normalize the counts
     channel_count['count'] = channel_count['count'] / channel_count['count'].max()
     # Order the channel_count dataframe so it is in the same order as the raw_ecog
     channel_count = channel_count.set_index('channel_name').reindex(raw_ecog.ch_names).reset_index()
-    print(channel_count)
-    
+
     # Map counts to colors
     sensor_colors = np.array(channel_count['count'].map(rgba).values.tolist(), float)
-        
+
     ## Add sensors to the brain
     brain.add_sensors(raw_ecog.info,
                       trans="fsaverage",
                       ecog = True,
                       sensor_colors=sensor_colors)
-    
 
 def progress_bar(samples, total_samples, message = ""):
     """
