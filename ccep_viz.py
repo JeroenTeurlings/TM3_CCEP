@@ -1,7 +1,5 @@
 """
-This module loads BrainVision data, applies a band-pass filter, plots the raw data,
-performs a Fast Fourier Transform (FFT) to analyze frequency components, 
-converts power spectral densities (PSDs) to dB, and plots the PSD.
+
 """
 # Import necessary libraries
 import os
@@ -9,8 +7,9 @@ import io
 import time
 import sys
 from pathlib import Path
+from tkinter import Tk
+from tkinter.filedialog import askopenfilename
 import mne
-import mne_connectivity
 from mne.epochs import Epochs
 import numpy as np
 from matplotlib import colormaps
@@ -28,11 +27,18 @@ import ccep_connectivity
 # Global settings for plotting
 mne.viz.set_3d_backend('pyvista')
 
-# Define the subject, session, task, and run
-SUBJECT = 'sub-ccepAgeUMCU10'
-SESSION = 'ses-1'
-TASK = 'task-SPESclin'
-RUN = 'run-031402'
+# Get filename for subject
+Tk().withdraw()
+filename = askopenfilename()
+filename = os.path.basename(filename)
+
+# Split the filename to get the subject name, session, task, and run
+filename = filename.split('_')
+SUBJECT = filename[0]
+SESSION = filename[1]
+TASK = filename[2]
+RUN = filename[3]
+print(f'Subject: {SUBJECT}, Session: {SESSION}, Task: {TASK}, Run: {RUN}')
 
 # paths to mne datasets - FreeSurfer subject
 sample_path = mne.datasets.sample.data_path()
@@ -43,7 +49,7 @@ STIM_PAIR = "FC01-FC02"
 
 # Binary switches for plotting
 PLOT_RAW = False
-PLOT_ELECTRODES = False
+PLOT_ELECTRODES = True
 PLOT_ELECTRODES_GIF = False
 PLOT_EPOCHS = False
 PLOT_PEAKS = False
@@ -53,8 +59,8 @@ PLOT_MOV_AMPLITUDE = False # Computational heavy
 PLOT_CCEP_LATENCY = False
 PLOT_CCEP_GAMMA = False
 PLOT_MOV_GAMMA = False # Computational heavy
-TOTAL_ACTIVITY = True
-ALPHA = 0.0
+TOTAL_ACTIVITY = False
+ALPHA = 0
 
 def main():
     """
@@ -121,7 +127,7 @@ def load_data():
         f'{SUBJECT}_{SESSION}_{TASK}_{RUN}_ieeg.vhdr'), preload=True)
     electrodes = pd.read_csv(f'{SUBJECT}_{SESSION}_electrodes.tsv', sep='\t')
     channels = pd.read_csv(f'{SUBJECT}_{SESSION}_{TASK}_{RUN}_channels.tsv',
-                           sep='\t')
+                        sep='\t')
     events = pd.read_csv(f'{SUBJECT}_{SESSION}_{TASK}_{RUN}_events.tsv', sep='\t')
     print(raw.info)
     global SFREQ
@@ -177,7 +183,7 @@ def set_montage(raw_ecog, electrodes):
     """
     # Make electrode postions into a dictionary
     el_position = {row['name']: [row['x'], row['y'], row['z']] for index,
-                   row in electrodes.iterrows()}
+                row in electrodes.iterrows()}
 
     # Change position of electrodes to meters
     for key in el_position:
@@ -192,22 +198,22 @@ def plot_electrodes(raw_ecog):
     """
     Function to plot the electrode locations.
     """
-    Brain = mne.viz.get_brain_class()
-    brain = Brain("fsaverage",
-                  hemi="both",
-                  surf="pial",
-                  cortex="grey",
-                  subjects_dir=subjects_dir,
-                  background="white",
-                  interaction="terrain",
-                  show=True)
+    brain_electrodes = mne.viz.get_brain_class()
+    brain = brain_electrodes("fsaverage",
+                hemi="both",
+                surf="pial",
+                cortex="grey",
+                subjects_dir=subjects_dir,
+                background="white",
+                interaction="terrain",
+                show=True)
     brain.add_annotation("aparc.a2009s",
-                         borders=False,
-                         alpha=ALPHA)
+                        borders=False,
+                        alpha=ALPHA)
     brain.add_sensors(raw_ecog.info,
-                      trans="fsaverage",
-                      ecog = True,
-                      sensor_colors=(1.0, 1.0, 1.0, 0.5))
+                    trans="fsaverage",
+                    ecog = True,
+                    sensor_colors=(1.0, 1.0, 1.0, 0.5))
 
     if PLOT_ELECTRODES_GIF:
         screenshots = []
@@ -256,7 +262,7 @@ def make_epochs(raw_ecog, events):
     events_ccep = events_ccep.values.astype(int)
 
     epoch = Epochs(raw_ecog, events_ccep, event_id=event_id, tmin=-2, tmax=2,
-                   baseline=None, preload=True, verbose=False)
+                baseline=None, preload=True, verbose=False)
     evoked = {site: epoch[site].average() for site in event_id.keys()}
 
     # apply baseline correction for every evoked in evoked
@@ -305,14 +311,45 @@ def find_ccep_peaks(evoked, electrodes):
 
             if amplitude > 2.6 * epoch_sd and TOTAL_ACTIVITY:
                 channel_name = selected_epoch.ch_names[channels]
-                x_coordinate = electrodes[electrodes['name'] == channel_name]['x'].values[0]
-                y_coordinate = electrodes[electrodes['name'] == channel_name]['y'].values[0]
-                z_coordinate = electrodes[electrodes['name'] == channel_name]['z'].values[0]
+                stim_0 = stim_pair.split('-')[0]
+                x_stim = electrodes[electrodes['name'] == stim_0]['x'].values[0]
+                y_stim = electrodes[electrodes['name'] == stim_0]['y'].values[0]
+                z_stim = electrodes[electrodes['name'] == stim_0]['z'].values[0]
+                destrieux_stim = electrodes[electrodes['name'] == stim_0] \
+                    ['Destrieux_label'].values[0]
+                x_rec = electrodes[electrodes['name'] == channel_name]['x'].values[0]
+                y_rec = electrodes[electrodes['name'] == channel_name]['y'].values[0]
+                z_rec = electrodes[electrodes['name'] == channel_name]['z'].values[0]
+                destrieux_rec = electrodes[electrodes['name'] == channel_name] \
+                    ['Destrieux_label'].values[0]
                 significant_electrode = {
-                    'channel_name': channel_name,
-                    'x_coordinate': x_coordinate,
-                    'y_coordinate': y_coordinate,
-                    'z_coordinate': z_coordinate,
+                    'stim_name': stim_0,
+                    'xyz_stim': [x_stim, y_stim, z_stim],
+                    'destrieux_stim': int(destrieux_stim),
+                    'rec_name': channel_name,
+                    'xyz_rec': [x_rec, y_rec, z_rec],
+                    'destrieux_rec': int(destrieux_rec),
+                }
+                significant_electrodes.append(significant_electrode)
+
+                stim_1 = stim_pair.split('-')[1]
+                x_stim = electrodes[electrodes['name'] == stim_1]['x'].values[0]
+                y_stim = electrodes[electrodes['name'] == stim_1]['y'].values[0]
+                z_stim = electrodes[electrodes['name'] == stim_1]['z'].values[0]
+                destrieux_stim = electrodes[electrodes['name'] == stim_1] \
+                    ['Destrieux_label'].values[0]
+                x_rec = electrodes[electrodes['name'] == channel_name]['x'].values[0]
+                y_rec = electrodes[electrodes['name'] == channel_name]['y'].values[0]
+                z_rec = electrodes[electrodes['name'] == channel_name]['z'].values[0]
+                destrieux_rec = electrodes[electrodes['name'] == channel_name] \
+                    ['Destrieux_label'].values[0]
+                significant_electrode = {
+                    'stim_name': stim_1,
+                    'xyz_stim': [x_stim, y_stim, z_stim],
+                    'destrieux_stim': int(destrieux_stim),
+                    'rec_name': channel_name,
+                    'xyz_rec': [x_rec, y_rec, z_rec],
+                    'destrieux_rec': int(destrieux_rec),
                 }
                 significant_electrodes.append(significant_electrode)
 
@@ -386,16 +423,16 @@ def plot_ccep_amplitude(amplitudes, raw_ecog):
     ## Initialize brain
     Brain = mne.viz.get_brain_class()
     brain = Brain("fsaverage",
-                  hemi="both",
-                  surf="pial",
-                  cortex="grey",
-                  subjects_dir=subjects_dir,
-                  background="white",
-                  interaction="terrain",
-                  show=True)
+                hemi="both",
+                surf="pial",
+                cortex="grey",
+                subjects_dir=subjects_dir,
+                background="white",
+                interaction="terrain",
+                show=True)
     brain.add_annotation("aparc.a2009s",
-                         borders=False,
-                         alpha=ALPHA) # Make the annotation transparent or not
+                        borders=False,
+                        alpha=ALPHA) # Make the annotation transparent or not
     brain.show_view(azimuth=180, elevation=90, focalpoint="auto", distance="auto")
 
     ## Creating normalized amplitudes  
@@ -411,9 +448,9 @@ def plot_ccep_amplitude(amplitudes, raw_ecog):
 
     ## Add sensors to the brain
     brain.add_sensors(raw_ecog.info,
-                      trans="fsaverage",
-                      ecog = True,
-                      sensor_colors=sensor_colors)
+                    trans="fsaverage",
+                    ecog = True,
+                    sensor_colors=sensor_colors)
 
 def plot_mov_amplitude(evoked, raw_ecog):
     """
@@ -423,13 +460,13 @@ def plot_mov_amplitude(evoked, raw_ecog):
     # Initialize brain
     brain_amplitude = mne.viz.get_brain_class()
     brain = brain_amplitude("fsaverage",
-                  hemi="both",
-                  surf="pial",
-                  cortex="grey",
-                  subjects_dir=subjects_dir,
-                  background="white",
-                  interaction="terrain",
-                  show=True)
+                hemi="both",
+                surf="pial",
+                cortex="grey",
+                subjects_dir=subjects_dir,
+                background="white",
+                interaction="terrain",
+                show=True)
     brain.show_view(azimuth=180,
                     elevation=90,
                     focalpoint="auto",
@@ -456,7 +493,7 @@ def plot_mov_amplitude(evoked, raw_ecog):
     for samples, e in enumerate(selected_epoch.times):
         # Progress bar
         progress_bar(samples, len(selected_epoch.times),
-                     message = "Calculating sample amplitudes: ")
+                    message = "Calculating sample amplitudes: ")
 
         amplitudes = []
         # Determine the amplitude of the CCEP response
@@ -466,7 +503,7 @@ def plot_mov_amplitude(evoked, raw_ecog):
                 amplitude = epoch_data[samples]
                 amplitudes.append(amplitude)
         non_stim_amplitudes = [amplitudes[i] for i in range(len(amplitudes))
-                               if i not in stim_indices]
+                            if i not in stim_indices]
         all_amplitudes.append(non_stim_amplitudes)
     print('Done!')
 
@@ -522,7 +559,7 @@ def plot_mov_amplitude(evoked, raw_ecog):
         io_buf.seek(0)
         fig_data = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
                             newshape=(int(ccep_figure.bbox.bounds[3]),
-                                      int(ccep_figure.bbox.bounds[2]), -1))
+                                    int(ccep_figure.bbox.bounds[2]), -1))
         io_buf.close()
 
         pil_im = Image.fromarray(fig_data)
@@ -535,8 +572,8 @@ def plot_mov_amplitude(evoked, raw_ecog):
     image_one = frames[0]
     os.chdir(r"C:\Users\jjbte\Documents\TM3\Afstuderen\CCEP_GIF")
     image_one.save(f"{SUBJECT}_{SESSION}_{RUN}_{STIM_PAIR}_binarized_test.gif", format="GIF",
-                   append_images=frames[1:],
-                   save_all=True, duration=100, loop=0)
+                append_images=frames[1:],
+                save_all=True, duration=100, loop=0)
     print('GIF created!')
     del frames, image_one, pil_im, im, all_colors, all_amplitudes
 
@@ -555,16 +592,16 @@ def plot_ccep_latency(latencies, raw_ecog):
     ## Initialize brain
     Brain = mne.viz.get_brain_class()
     brain = Brain("fsaverage",
-                  hemi="both",
-                  surf="pial",
-                  cortex="grey",
-                  subjects_dir=subjects_dir,
-                  background="white",
-                  interaction="terrain",
-                  show=True)
+                hemi="both",
+                surf="pial",
+                cortex="grey",
+                subjects_dir=subjects_dir,
+                background="white",
+                interaction="terrain",
+                show=True)
     brain.add_annotation("aparc.a2009s",
-                         borders=False,
-                         alpha=ALPHA)
+                        borders=False,
+                        alpha=ALPHA)
     brain.show_view(azimuth=180, elevation=90, focalpoint="auto", distance="auto")
 
     ## Creating normalized latencies
@@ -583,9 +620,9 @@ def plot_ccep_latency(latencies, raw_ecog):
 
     ## Add sensors to the brain
     brain.add_sensors(raw_ecog.info,
-                      trans="fsaverage",
-                      ecog = True,
-                      sensor_colors=sensor_colors)
+                    trans="fsaverage",
+                    ecog = True,
+                    sensor_colors=sensor_colors)
 
 def plot_ccep_gamma(evoked, raw_ecog):
     """ 
@@ -633,13 +670,13 @@ def plot_mov_gamma(evoked, raw_ecog):
     # Initialize brain
     brain_gamma = mne.viz.get_brain_class()
     brain = brain_gamma("fsaverage",
-                  hemi="both",
-                  surf="pial",
-                  cortex="grey",
-                  subjects_dir=subjects_dir,
-                  background="white",
-                  interaction="terrain",
-                  show=True)
+                hemi="both",
+                surf="pial",
+                cortex="grey",
+                subjects_dir=subjects_dir,
+                background="white",
+                interaction="terrain",
+                show=True)
     brain.show_view(azimuth=180,
                     elevation=90,
                     focalpoint="auto",
@@ -666,7 +703,7 @@ def plot_mov_gamma(evoked, raw_ecog):
     for samples, e in enumerate(epoch_gamma.times):
         # Progress bar
         progress_bar(samples, len(epoch_gamma.times),
-                     message = "Calculating sample gamma power: ")
+                    message = "Calculating sample gamma power: ")
 
         # Determine the amplitude of the CCEP response
         gammas = []
@@ -682,7 +719,7 @@ def plot_mov_gamma(evoked, raw_ecog):
     # Normalize all gamma power
     all_gamma = pd.DataFrame(all_gamma)
     all_gamma_norm = 2 * (all_gamma - all_gamma.min()) \
-                          / (all_gamma.max() - all_gamma.min()) - 1
+                        / (all_gamma.max() - all_gamma.min()) - 1
     # Map all gamma to colors    
     all_colors = np.array(all_gamma_norm.map(rgba).values.tolist(),float)
 
@@ -717,7 +754,7 @@ def plot_mov_gamma(evoked, raw_ecog):
         io_buf.seek(0)
         fig_data = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
                             newshape=(int(ccep_figure.bbox.bounds[3]),
-                                      int(ccep_figure.bbox.bounds[2]), -1))
+                                    int(ccep_figure.bbox.bounds[2]), -1))
         io_buf.close()
 
         pil_im = Image.fromarray(fig_data)
@@ -729,8 +766,8 @@ def plot_mov_gamma(evoked, raw_ecog):
     image_one = images[0]
     os.chdir("C:/Users/jjbte/Documents/TM3/Afstuderen/CCEP_GIF")
     image_one.save(f"{SUBJECT}_{SESSION}_{RUN}_{STIM_PAIR}_GAMMA.gif",
-                   format="GIF", append_images=images[1:],
-                   save_all=True, duration=100, loop=0)
+                format="GIF", append_images=images[1:],
+                save_all=True, duration=100, loop=0)
     print('GIF created!')
     del images, image_one, pil_im, im, all_colors, all_gamma
 
@@ -755,25 +792,26 @@ def total_activity(raw_ecog, electrodes):
     cwd = os.getcwd()
     rgba = colormaps.get_cmap("Reds")
     channel_count = pd.DataFrame(pd.read_csv(cwd +f"/output/{SUBJECT}_channel_name_counts.tsv",
-                                             sep='\t'))
+                                            sep='\t'))
 
     ## Initialize brain
     brain_total = mne.viz.get_brain_class()
     brain = brain_total("fsaverage",
-                  hemi="both",
-                  surf="pial",
-                  cortex="grey",
-                  subjects_dir=subjects_dir,
-                  background="white",
-                  interaction="terrain",
-                  show=True)
+                hemi="both",
+                surf="pial",
+                cortex="grey",
+                subjects_dir=subjects_dir,
+                background="white",
+                interaction="terrain",
+                show=True)
     brain.add_annotation("aparc.a2009s",
-                         borders=False,
-                         alpha=ALPHA) # Make the annotation transparent or not
+                        borders=False,
+                        alpha=ALPHA) # Make the annotation transparent or not
     brain.show_view(azimuth=180, elevation=90, focalpoint="auto", distance="auto")
 
     # Add xyz coordinates from electrodes to channel_count dataframe
-    # channel_count = channel_count.join(electrodes.set_index('name')[['x', 'y', 'z']], on='channel_name')
+    # channel_count = channel_count.join(electrodes.set_index('name')[['x', 'y', 'z']],
+    # on='channel_name')
 
     # Check if all electrodes in montage are present in the channel_count dataframe
     for electrode in raw_ecog.ch_names:
@@ -782,14 +820,17 @@ def total_activity(raw_ecog, electrodes):
             y_coordinate = electrodes[electrodes['name'] == electrode]['y'].values[0]
             z_coordinate = electrodes[electrodes['name'] == electrode]['z'].values[0]
             channel_count = pd.concat([channel_count,
-                                       pd.DataFrame({'channel_name': [electrode],
-                                                     'x': [x_coordinate],
-                                                     'y': [y_coordinate],
-                                                     'z': [z_coordinate],
-                                                     'count': [0]})],
-                                       ignore_index=True)
+                                    pd.DataFrame({'stim_pair': ['Unknown'],
+                                                    'xyz_stim': [0, 0, 0],
+                                                    'destrieux_stim': ['Unknown'],
+                                                    'channel_name': [electrode],
+                                                    'xyz_rec': [x_coordinate, y_coordinate, z_coordinate],
+                                                    'destrieux_rec': ['Unknown'],
+                                                    #'count': [0]
+                                                    })],
+                                    ignore_index=True)
             print(f"Empty electrode {electrode} appended")
-        else:        
+        else:
             continue
     # Save appended channel_count dataframe
     path = 'C:/Users/jjbte/Documents/TM3/Afstuderen/Significant_Electrodes/total_activity/'
@@ -804,9 +845,9 @@ def total_activity(raw_ecog, electrodes):
 
     ## Add sensors to the brain
     brain.add_sensors(raw_ecog.info,
-                      trans="fsaverage",
-                      ecog = True,
-                      sensor_colors=sensor_colors)
+                    trans="fsaverage",
+                    ecog = True,
+                    sensor_colors=sensor_colors)
 
 def progress_bar(samples, total_samples, message = ""):
     """

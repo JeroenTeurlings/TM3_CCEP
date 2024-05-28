@@ -1,0 +1,84 @@
+import os
+import networkx as nx
+from networkx import adjacency_matrix
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import test_connectivity_robert as tc
+
+base_folder = 'C:/Users/jjbte/Documents/01. Projects/TM3/Afstuderen/Significant_Electrodes/'
+
+# Make list of subjects based on folder names in base_folder starting with sub-
+subjects = [f for f in os.listdir(base_folder) if f.startswith('sub-')]
+print("Including subjects: ", subjects)
+
+edge_unique = []
+
+for subject in subjects:
+    folder = os.path.join(base_folder, subject, 'output')
+    f = f'{subject}_output.tsv'
+
+    # Load subject_output file
+    graph_data = pd.read_csv(os.path.join(folder, f), sep='\t')
+
+    # Create a graph
+    G = nx.Graph()
+
+    # Create nodes from unique entries in destrieux_stim and destrieux_rec columns
+    G.add_nodes_from(graph_data['destrieux_stim'].unique())
+    G.add_nodes_from(graph_data['destrieux_rec'].unique())
+
+    # Create edges from combinations of destrieux_stim and destrieux_rec columns
+    G.add_edges_from(graph_data[['destrieux_stim', 'destrieux_rec']].values)
+
+    edge_unique.append(list(G.edges))
+
+G_total = nx.Graph()
+for subject in edge_unique:
+    for index in subject:
+        # Count occurence of entry (x,y) in both lists
+        count_total = 0
+        for i in edge_unique:
+            if index in i:
+                count_total += 1
+
+        # check for every entry if the first element was 44. If one is found, go up one loop
+        count_stim = 0
+        for i in edge_unique:
+            for j in i:
+                if j[0] == index[0]:
+                    count_stim += 1
+                    break
+
+        weight = count_total / count_stim if count_stim != 0 else 0
+
+        # Add edge to total graph with weigth
+        G_total.add_edge(index[0], index[1], weight=weight)
+
+G_total.remove_edges_from(nx.selfloop_edges(G_total))
+H = nx.Graph()
+H.add_nodes_from(sorted(G_total.nodes(data=True)))
+H.add_edges_from(G_total.edges(data=True))
+
+# Draw a weighted graph
+pos = nx.circular_layout(H)
+edges = H.edges()
+weights = [H[u][v]['weight'] for u, v in edges]
+
+# Draw nodes
+nx.draw_networkx_nodes(H, pos, node_color='blue')
+
+# Draw edges
+nx.draw_networkx_edges(H, pos, edgelist=edges, width=weights)
+
+# Draw labels
+nx.draw_networkx_labels(H, pos)
+
+plt.show()
+
+# Get the adjacency matrix (returns a SciPy sparse matrix)
+adjacency_matrix_sparse = nx.adjacency_matrix(H)
+
+# Convert to a regular (dense) NumPy array
+adjacency_matrix = adjacency_matrix_sparse.toarray()
+tc.F = H

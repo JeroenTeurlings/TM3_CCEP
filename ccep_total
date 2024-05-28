@@ -29,7 +29,8 @@ def load_data():
     Load the data from the total_activity folder.
     """
     # path to total_activity
-    total_activity_path = 'C:/Users/jjbte/Documents/TM3/Afstuderen/Significant_Electrodes/total_activity'
+    total_activity_path = 'C:/Users/jjbte/Documents/TM3/Afstuderen/Significant_Electrodes/' \
+        + 'total_activity'
 
     # Load and concatenate all tsv data files
     data = pd.concat([pd.read_csv(f'{total_activity_path}/{file}', sep='\t') 
@@ -60,7 +61,7 @@ def set_montage(info, data):
     montage = mne.channels.make_dig_montage(el_position, coord_frame='mni_tal')
     montage.add_mni_fiducials(subjects_dir)
     info.set_montage(montage)
-    
+
     return info
 
 def plot_electrodes(info, data):
@@ -94,6 +95,6 @@ def plot_electrodes(info, data):
                       trans="fsaverage",
                       ecog = True,
                       sensor_colors=sensor_colors)
-    
+
 if __name__ == "__main__":
     main()
