@@ -29,7 +29,7 @@ def load_data():
     Load the data from the total_activity folder.
     """
     # path to total_activity
-    total_activity_path = 'C:/Users/jjbte/Documents/TM3/Afstuderen/Significant_Electrodes/' \
+    total_activity_path = 'C:/Users/jjbte/Documents/01. Projects/TM3/Afstuderen/Significant_Electrodes/' \
         + 'total_activity'
 
     # Load and concatenate all tsv data files

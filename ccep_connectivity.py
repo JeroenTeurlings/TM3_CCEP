@@ -10,14 +10,15 @@ COUNT = None
 
 def main():
     print('Joining tsv files and counting significant electrodes')
+    os.chdir(f"C:/Users/jjbte/Documents/01. Projects/TM3/Afstuderen/Significant_Electrodes/{SUBJECT}")
     global FOLDER, OUTPUT, COUNT
-    FOLDER = f'C:/Users/jjbte/Documents/TM3/Afstuderen/Significant_Electrodes/{SUBJECT}/'
+    FOLDER = f'C:/Users/jjbte/Documents/01. Projects/TM3/Afstuderen/Significant_Electrodes/{SUBJECT}/'
     OUTPUT = FOLDER + f'output/{SUBJECT}_output.tsv'
     COUNT = FOLDER + f'/output/{SUBJECT}_channel_name_counts.tsv'
 
     Path(FOLDER + "output").mkdir(parents=True, exist_ok=True)
     significant_electrodes = join_tsv(FOLDER, OUTPUT)
-    # sig_channel_count(significant_electrodes)
+    sig_channel_count(significant_electrodes)
 
 def join_tsv(folder, output):
     # Get all tsv files in the folder
@@ -41,15 +42,15 @@ def join_tsv(folder, output):
 
     return significant_electrodes_local
 
-# def sig_channel_count(sig_electrodes):
-#     # Save number of unique channel_name and amount of repetitions in dictionary
-#     channel_name_counts = sig_electrodes.groupby('channel_name').agg(
-#         count=pd.NamedAgg(column='channel_name', aggfunc='size'),
-#         xyz=pd.NamedAgg(column='xyz', aggfunc='first')
-#     ).reset_index()
-#     channel_name_counts.to_csv(COUNT, sep='\t', index=False)
+def sig_channel_count(sig_electrodes):
+    # Save number of unique channel_name and amount of repetitions in dictionary
+    channel_name_counts = sig_electrodes.groupby('stim_name').agg(
+        count=pd.NamedAgg(column='stim_name', aggfunc='size'),
+        xyz=pd.NamedAgg(column='xyz_stim', aggfunc='first')
+    ).reset_index()
+    channel_name_counts.to_csv(COUNT, sep='\t', index=False)
 
-#     print(f'Amount of unique channel names: {len(channel_name_counts)}')
+    print(f'Amount of unique channel names: {len(channel_name_counts)}')
 
 if __name__ == '__main__':
     main()
