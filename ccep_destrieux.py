@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-
 implemented from:
 https://stackoverflow.com/questions/69805091/how-to-create-an-interactive-brain-shaped-graph
-
-@author: jeroen
 """
 import os
 import ast
@@ -15,10 +12,10 @@ import numpy as np
 import networkx as nx
 import pandas as pd
 
-# Switches
-HEMI = 'lh'  # 'lh' or 'rh' or 'both'. 'both' will combine both hemispheres faulty
+# Hemisphere switch
+HEMI = 'lh'  # 'lh' or 'rh' or 'both'. 'both' will combine both hemispheres, faulty
 
-#%% Define function
+# Define mesh functions
 def mesh_properties(mesh_coords):
     """Calculate center and radius of sphere minimally containing a 3-D mesh
 
@@ -41,7 +38,7 @@ def mesh_properties(mesh_coords):
 
     return(center, max(radii))
 
-#%% Make graph
+# Define locations of electrode data to be plotted. Results from ccep_merger.py
 if HEMI == 'lh':
     base_folder = 'C:/Users/jjbte/Documents/01. Projects/TM3/Afstuderen/Significant_Electrodes/class_3.4/left/'
 elif HEMI == 'rh':
@@ -55,13 +52,13 @@ else:
 subjects = [f for f in os.listdir(base_folder) if f.startswith('sub-')]
 print("Including subjects: ", subjects)
 
-# total_output = pd.DataFrame()
 edge_unique = []
 mean_coordinates = {}
 mean_coords = {}
 # Initialize a dictionary to hold lists of coordinates for each label
 coord_lists = {label: {'x': [], 'y': [], 'z': []} for label in mean_coords.keys()}
 
+# Loop over all subjects. Combine all edges and calculate mean coordinates for each label
 for subject in subjects:
     folder = os.path.join(base_folder, subject, 'output')
     f = f'{subject}_output.tsv'
@@ -117,11 +114,11 @@ for subject in subjects:
                 coord_lists[label] = {'x': [], 'y': [], 'z': []}
             coord_lists[label][k].append(v)
 
-# Calculate the averages
+# Calculate the average coordinates for each label
 mean_coordinates = {label: {k: sum(v) / len(v) for k, v in coords.items()}
                     for label, coords in coord_lists.items()}
 
-# Add missing labels to the dictionary
+# Add missing labels to the dictionary to avoid key errors
 for i in range(0, 75):
     if i not in mean_coordinates:
         # Prepare new entry
@@ -130,6 +127,7 @@ for i in range(0, 75):
 # Sort the dictionary by the keys
 mean_coordinates = dict(sorted(mean_coordinates.items()))
 
+# Create a graph with the mean coordinates
 G_total = nx.Graph()
 for subject in edge_unique:
     for index in subject:
@@ -146,15 +144,16 @@ for subject in edge_unique:
                 if j[0] == index[0]:
                     COUNT_STIM += 1
                     break
-
+        # Calculate weight
         weight = COUNT_TOTAL / COUNT_STIM if COUNT_STIM != 0 else 0
 
         # Add edge to total graph with weigth
         G_total.add_edge(index[0], index[1], weight=weight)
 
+# Remove self loops
 G_total.remove_edges_from(nx.selfloop_edges(G_total))
 
-# Check if every number is included in nodes up until 73
+# Check if every patient is included in the graph
 for i in range(1, 74):
     if i not in G_total.nodes:
         # Add node to graph
@@ -164,7 +163,7 @@ G = nx.Graph()
 G.add_nodes_from(sorted(G_total.nodes(data=True)))
 G.add_edges_from(G_total.edges(data=True))
 
-#%% Download and prepare dataset from BrainNet repo
+#%% Download and prepare dataset from BrainNet repo for visualization
 coords = np.loadtxt(np.DataSource().open('https://raw.githubusercontent.com/mingruixia/BrainNet-Viewer/master/Data/SurfTemplate/BrainMesh_Ch2_smoothed.nv'), skiprows=1, max_rows=53469)
 x, y, z = coords.T
 
@@ -172,7 +171,7 @@ triangles = np.loadtxt(np.DataSource().open('https://raw.githubusercontent.com/m
 triangles_zero_offset = triangles - 1
 i, j, k = triangles_zero_offset.T
 
-# Generate 3D mesh.  Simply replace with 'fig = go.Figure()' or turn opacity to zero if seeing brain mesh is not desired.
+# Generate 3D mesh.  
 fig = go.Figure(data=[go.Mesh3d(x=x, y=y, z=z,
                                  i=i, j=j, k=k,
                                  color='lightpink', opacity=0.25, name='', showscale=False, hoverinfo='none')])
@@ -183,41 +182,20 @@ nodes_x = [v['x'] for v in mean_coordinates.values()]
 nodes_y = [v['y'] for v in mean_coordinates.values()]
 nodes_z = [v['z'] for v in mean_coordinates.values()]
 
-# edge_x = []
-# edge_y = []
-# edge_z = []
-
-# for s, t in G.edges():
-#     edge_x += [mean_coordinates[s]['x'], mean_coordinates[t]['x']]
-#     edge_y += [mean_coordinates[s]['y'], mean_coordinates[t]['y']]
-#     edge_z += [mean_coordinates[s]['z'], mean_coordinates[t]['z']]
-
-
-# # Decide some more meaningful logic for coloring certain nodes.
-# Currently the squared distance from the mesh point at index 42.
-# node_colors = []
-# for node in G.nodes():
-#     if np.sum((pos_brain[node] - coords[42]) ** 2) < 1000:
-#         node_colors.append('red')
-#     else:
-#         node_colors.append('gray')
-
 # Add node plotly trace
 fig.add_trace(go.Scatter3d(x=nodes_x, y=nodes_y, z=nodes_z,
-                        #    text=labels,
                            mode='markers',
                            hoverinfo='text',
                            name='Nodes',
                            marker=dict(
                                        size=5,
-                                    #    color=node_colors
                                       )
                            ))
 
-# Add edge plotly trace. Comment out or turn opacity to zero if not desired.
+# Add edge plotly trace.
 for s, t, data in G.edges(data=True):
     if s in mean_coordinates and t in mean_coordinates:
-        weight = data['weight']  # assuming 'weight' is between 0 and 1
+        weight = data['weight']
         fig.add_trace(go.Scatter3d(x=[mean_coordinates[s]['x'], mean_coordinates[t]['x']],
                                    y=[mean_coordinates[s]['y'], mean_coordinates[t]['y']],
                                    z=[mean_coordinates[s]['z'], mean_coordinates[t]['z']],

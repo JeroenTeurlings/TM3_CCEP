@@ -1,1 +1,11 @@
-"# TM3_CCEP" 
+This GitHub repository includes the scripts and outputs mentioned in the Technical Medicine Master thesis "Mapping the Mind: Visualizing Cortico-Cortical Evoked Potentials to Explore Functional Connectivity". 
+
+Four scripts are present. ccep_main.py is the main script that performs most of the functionalities mentioned in the thesis. In this main script, the data is loaded, preprocessed, and peak detection is performed. Everything that is documented in the chapter "Data, Preprocessing, and Peak Detection" and in Chapter 3 "Individual Connectivity Visualizations" is present in ccep_main.py. For every iteration of the script and for every change of stimulation electrode pair or patient, the script needs to be run again. Specifying which patient and which electrode pair should be stimulated, and what visualizations you want to see can be changed at the top of ccep_main.py, where binary switches turn parts of the code on or off. Take note of some necessities with certain parts of the code, which are written next to the switches.
+
+Peaks found with the peak detection algorithm in ccep_main.py can be visually checked by turning the PLOT_PEAKS and TOTAL_DATA switches to True. This plots all individual peaks with the option to either accept the peak (press 0) or refuse the peak (press 1). The choices will be saved in the files created by ccep_merger.py.
+
+The ccep_main.py script calls on the ccep_merger.py script when the switch TOTAL_DATA is turned to True. This script collects all the registered CCEP N1 peaks found in ccep_merger.py and combines them in a single file containing all the CCEP responses per patient. These files can then be used in further Graph Analytics.
+
+The scripts ccep_destrieux.py and ccep_electrodes.py produce graphs of brain connectively based on Destrieux labels and individual electrodes, respectively. Both scripts use the data produced by ccep_main.py and combined by ccep_merger.py. Once the data is available after running ccep_main.py, both graph scripts can be run independently. 
+
+The folder Visuals includes all the images and video's produced by the script that are mentioned in the thesis. These can be independently loaded and played, and it is advised to watch them together with reading the report. If more visualizations are wished for, these can be produced by running the script on the data from this open-source website: https://openneuro.org/datasets/ds004080/

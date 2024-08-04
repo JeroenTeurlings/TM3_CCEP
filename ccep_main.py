@@ -5,29 +5,21 @@ and plot CCEP data, facilitating the understanding and interpretation of cortica
 to electrical stimulation. Key features include data loading, preprocessing, analysis routines, 
 and visualization tools to generate insightful plots and graphs.
 
-Functions:
-- load_data: Loads CCEP data from specified sources.
-- preprocess_data: Applies preprocessing steps to clean and prepare the data for analysis.
-- analyze_ccep: Performs analysis on the preprocessed data to extract relevant metrics and features.
-- plot_ccep: Generates plots and visualizations to represent the analyzed data effectively.
-
 Usage:
 To use this script, ensure that all dependencies are installed and that the necessary data files
 are available in the specified directory. Modify the script's parameters as needed to fit your data
 and analysis requirements. Run the script from in an interactive window to assure smooth execution.
 
-Fill in paths:
-
+Remember to fill in specific data paths, parameters, and settings as needed for your analysis.
 
 Note:
 This script is part of a larger project on studying cortical responses and is intended for research
-purposes. Ensure that you have the appropriate permissions and ethical approvals to use and analyze
-the data.
+purposes. It is not a standalone application and may require additional modifications to suit
+specific use cases or data formats.
 
-Dependencies:
-- NumPy for numerical operations.
-- Matplotlib and Seaborn for plotting and visualization.
-- SciPy for scientific computing and analysis.
+Can be used in combination with ccep_merger.py, ccep_destrieux.py and ccep_electrodes.py to
+merge, process and visualize CCEP data in graphs.
+
 """
 # Import necessary libraries
 import os
@@ -55,7 +47,7 @@ import ccep_merger
 # Global settings for plotting
 mne.viz.set_3d_backend('pyvista')
 
-# Select the .vhdr file to load
+# Select the patient and .vhdr file to load
 Tk().withdraw()
 print('Select the .vhdr file to load')
 filename = askopenfilename()
@@ -79,7 +71,7 @@ subjects_dir = sample_path / "subjects"
 # Atlas transparency. 0 is fully transparent, 1 is fully opaque
 ALPHA = 0
 
-## Binary switches for plotting
+## Binary switches for plotting. Set to True to enable plotting.
 # Basic plots
 PLOT_RAW = False
 PLOT_ELECTRODES = False
@@ -92,11 +84,11 @@ PLOT_PEAKS = False
 BINARIZE_PEAKS = False
 PLOT_CCEP_AMPLITUDE = False
 PLOT_CCEP_LATENCY = False
-PLOT_CCEP_GAMMA = False
+PLOT_CCEP_GAMMA = False # NOTE: Not implemented yet! Not tested!
 
-# Animation plots. Computationally heavy!
+# Animation plots. Computationally heavy! Provide specific STIM_PAIR to plot!
 PLOT_MOV_AMPLITUDE = True
-PLOT_MOV_GAMMA = False
+PLOT_MOV_GAMMA = False # NOTE: Not implemented yet! Not tested!
 
 # Graph analysis
 TOTAL_ACTIVITY = False # Also turn on PLOT_PEAKS!
@@ -288,7 +280,7 @@ def plot_electrodes(raw_ecog):
                 interaction="terrain",
                 show=True)
 
-    # Add annotation to the brain. Fill in ALPHA value!
+    # Add annotation to the brain. Fill in ALPHA value at the top!
     brain.add_annotation("aparc.a2009s",
                         borders=False,
                         alpha=ALPHA)
@@ -311,7 +303,7 @@ def plot_electrodes(raw_ecog):
             screenshots.append(Image.fromarray(brain.screenshot(mode="rgb", time_viewer=True)))
         # Fill in the path where the GIF should be saved
         os.chdir(output_folder)
-        screenshots[0].save("Electrodes_annot.gif", format="GIF",
+        screenshots[0].save("Electrodes.gif", format="GIF",
                     append_images=screenshots[1:],
                     save_all=True, duration=50, loop=0)
 
@@ -381,31 +373,39 @@ def find_ccep_peaks(evoked, electrodes):
     """
     Function to find the peaks of the CCEP response.
     """
-    # Extract CCEP amplitudes
+    # Specify the peak detection parameters and initialize variables
     PEAK_SD = 3.4
     total_stim_pairs = len(evoked.keys()) if TOTAL_ACTIVITY else 1
     stim_pair_counter = 0  # Initialize a counter for stimulation pairs
 
+    # If TOTAL_ACTIVITY is True, loop through all stimulation pairs
+    # Otherwise, just one stimulation pair is processed. Specify the pair in STIM_PAIR.
     if TOTAL_ACTIVITY:
         stim_pairs = evoked.keys()
         significant_electrodes = []
     else:
         stim_pairs = [STIM_PAIR]
 
+    # Loop through each stimulation pair. Just one pair if TOTAL_ACTIVITY is False.
     for stim_pair in stim_pairs:
         stim_pair_counter += 1  # Increment the stim_pair_counter for each stim_pair processed
         selected_epoch = evoked[stim_pair].copy()
         amplitudes = []
         latencies = []
         labels = []
+        significant_electrodes = []
 
+        # Loop through each channel in the epoch
         for channels, e in enumerate(selected_epoch.ch_names):
+            # Calculate the standard deviation of the epoch data
             epoch_sd = np.std(selected_epoch.get_data(picks=[channels], tmin=-2, tmax=-0.1))
+            # Ensure a minimum standard deviation of 50 uV
             if epoch_sd < 50/1000000:
                 epoch_sd = 50/1000000
             epoch_data = selected_epoch.get_data(picks=[channels],
                                                 tmin=0.009,
                                                 tmax=0.100).squeeze()*-1 # Invert data for N1 peak
+            # Find the peaks in the epoch data. Peak detection parameters by Van Blooijs et al. (2023)
             amplitudes_index, _ = scipy.signal.find_peaks(epoch_data,
                                                         distance= 200, # To prevent multiple peaks
                                                         height = PEAK_SD * epoch_sd,
@@ -420,7 +420,7 @@ def find_ccep_peaks(evoked, electrodes):
                 # add 2.009 seconds to account for measurement window
                 latency = selected_epoch.times[amplitudes_index] + 2.009
 
-            # Label the peaks
+            # Label the peaks. Visual check of all peaks. Only if TOTAL_ACTIVITY and PLOT_PEAKS are True
             if amplitude > PEAK_SD * epoch_sd and TOTAL_ACTIVITY and PLOT_PEAKS:
                 channel_name = selected_epoch.ch_names[channels]
                 epoch_data_plot = selected_epoch.get_data(picks=[channels],
@@ -436,6 +436,7 @@ def find_ccep_peaks(evoked, electrodes):
                 print(f"Stim Pair Progress: {stim_pair_percentage:.2f}% - Plotting signal...")
                 print('Label 0 (clean) or 1 (artefact). Or Q to save and exit')
                 fig = plt.figure()
+                # Add a key press event to label the peaks. Function is defined in PeakLabeler class
                 labeler = PeakLabeler()
                 fig.canvas.mpl_connect('key_press_event', labeler.press)
                 plt.xlabel('Time (s)')
@@ -449,7 +450,6 @@ def find_ccep_peaks(evoked, electrodes):
                 plt.axvline(x=0, color='black', linestyle='-')
                 plt.ylim(-0.003, 0.003)
                 plt.xlim(-0.050, 0.100)
-                # plt.axhline(y=(PEAK_SD * epoch_sd), color='r', linestyle='--')
                 plt.axhline(y=-(PEAK_SD * epoch_sd), color='r', linestyle='--')
                 plt.axvline(x=0.009, color='black', linestyle='dotted')
                 plt.show(block=True)
@@ -467,6 +467,9 @@ def find_ccep_peaks(evoked, electrodes):
                 print(f'Channel {channel_name} has a peak at {latency}'
                     f' seconds with an amplitude of {amplitude}')
 
+                # Save the labeled peaks for further analysis
+                # Creates a TSV file with the labeled peaks and its information
+                # Stimulation pair is seen two individual stimulations.
                 channel_name = selected_epoch.ch_names[channels]
                 stim_0 = stim_pair.split('-', maxsplit=1)[0]
                 x_stim = electrodes[electrodes['name'] == stim_0]['x'].values[0]
@@ -529,7 +532,7 @@ def find_ccep_peaks(evoked, electrodes):
             sig_elec_df.to_csv(f"{SUBJECT}_{SESSION}_{RUN}_{stim_pair}.tsv",
                             sep='\t', index=False)
 
-        # Binarize the peaks
+        # Binarize the peaks. If enabled, set amplitudes to 1 if above threshold, 0 otherwise
         if BINARIZE_PEAKS:
             amplitudes = np.where(np.array(amplitudes) > 0, 1, 0).squeeze()
 
@@ -537,7 +540,8 @@ def find_ccep_peaks(evoked, electrodes):
 
 def plot_ccep_amplitude(amplitudes, raw_ecog):
     """
-    Function to plot the CCEP amplitude.
+    Function to plot the CCEP amplitudes per electrode. The amplitudes are color-coded
+    and displayed on a 3D brain model. The stimulation pair is highlighted in yellow.
     """
     ## Initialize variables
     # Get index of stim_pair in raw_ecog
@@ -582,7 +586,9 @@ def plot_ccep_amplitude(amplitudes, raw_ecog):
 
 def plot_mov_amplitude(evoked, raw_ecog):
     """
-    Function to plot the CCEP amplitude over time.
+    Function to plot the CCEP amplitude over time. The amplitudes are color-coded
+    and displayed on a 3D brain model. The stimulation pair is highlighted in yellow.
+    This animation is saved as a GIF file.
     """
     ## Initialize variables
     # Initialize brain
@@ -624,7 +630,7 @@ def plot_mov_amplitude(evoked, raw_ecog):
                     message = "Calculating sample amplitudes: ")
 
         amplitudes = []
-        # Determine the amplitude of the CCEP response
+        # Determine the amplitude of the CCEP response for each channel
         for channels, el in enumerate(selected_epoch.ch_names):
             epoch_data = selected_epoch.copy().get_data(picks=[channels]).squeeze()
             if samples < len(epoch_data):
@@ -635,6 +641,9 @@ def plot_mov_amplitude(evoked, raw_ecog):
         all_amplitudes.append(non_stim_amplitudes)
     print('Done!')
 
+    # Binarize the peaks. If enabled, set amplitudes to 1 if above threshold, 0 otherwise
+    # If not, normalize and winsorize the amplitudes. Taking the top 1% and bottom 1% of the data
+    # and setting them to the 1% and 99% percentile respectively.
     if BINARIZE_PEAKS:
         print('Binarizing amplitudes...')
         all_amplitudes = np.where(np.array(all_amplitudes) < -thresh, -1, 0).squeeze()
@@ -651,6 +660,8 @@ def plot_mov_amplitude(evoked, raw_ecog):
         amp_normed = norm(all_amplitudes.values)
     all_colors = rgba(amp_normed)
 
+    # Loop through each sample and plot the brain with the electrode colors for amplitude
+    # Plot the CCEP amplitude over time
     for samples, e in enumerate(selected_epoch.times):
         # Progress bar
         progress_bar(samples, len(selected_epoch.times), message = "Plotting samples: ")
@@ -681,6 +692,8 @@ def plot_mov_amplitude(evoked, raw_ecog):
         if BINARIZE_PEAKS:
             axis_1.axhline(y=-thresh * 1000000, color='r', linestyle='--')
 
+        # Save the figure to a buffer. This is necessary to create the GIF
+        # Append the figure to the frames list
         io_buf = io.BytesIO()
         ccep_figure.savefig(io_buf, format='raw')
         io_buf.seek(0)
@@ -696,9 +709,10 @@ def plot_mov_amplitude(evoked, raw_ecog):
 
     print('Done!')
     print('Creating GIF...')
+    # Save the frames to a GIF file
     image_one = frames[0]
     os.chdir(output_folder)
-    image_one.save(f"{SUBJECT}_{SESSION}_{RUN}_{STIM_PAIR}_PROD.gif", format="GIF",
+    image_one.save(f"{SUBJECT}_{SESSION}_{RUN}_{STIM_PAIR}_PROD_nonbin.gif", format="GIF",
                 append_images=frames[1:],
                 save_all=True, duration=100, loop=0)
     print('GIF created!')
@@ -706,7 +720,8 @@ def plot_mov_amplitude(evoked, raw_ecog):
 
 def plot_ccep_latency(latencies, raw_ecog):
     """
-    Function to plot the CCEP latency.
+    Function to plot the CCEP latency per electrode. The latencies are color-coded
+    and displayed on a 3D brain model. The stimulation pair is highlighted in yellow.
     """
     ## Initialize variables
     # Get index of stim_pair in raw_ecog
@@ -741,7 +756,7 @@ def plot_ccep_latency(latencies, raw_ecog):
     latencies_range = latencies_rec.max() - latencies_rec.min() # Range
     latencies_low = latencies_rec - latencies_rec.min() # Low
     latencies_rec_norm = 2*(latencies_low)/(latencies_range)-1 # Normalize
-    
+
     # Make colors
     sensor_colors = np.array(latencies_rec_norm.map(rgba).values.tolist(), float)
     # Insert stimulation pair color at EPOCH_INDEX
@@ -757,6 +772,8 @@ def plot_ccep_latency(latencies, raw_ecog):
 def plot_ccep_gamma(evoked, raw_ecog):
     """ 
     Function to plot the gamma power.
+    NOTE: This function is not yet complete and not used in the corresponding thesis.
+    It is not tested and may not work as intended.
     """
     # Make a copy of the epoch to avoid modifying the original
     gamma_power_t = (evoked[STIM_PAIR].copy().filter(30, 90).apply_hilbert(envelope=True))
@@ -795,6 +812,8 @@ def plot_ccep_gamma(evoked, raw_ecog):
 def plot_mov_gamma(evoked, raw_ecog):
     '''
     Function to plot the gamma power over time.
+    NOTE: This function is not yet complete and not used in the corresponding thesis.
+    It is not tested and may not work as intended.
     '''
     ## Initialize variables
     # Initialize brain
@@ -903,24 +922,21 @@ def plot_mov_gamma(evoked, raw_ecog):
 
 def total_activity():
     '''
-    Display the total significant electrode activity on a brain.
+    Calculates and displays the total significant electrode activity on a brain. 
+    Necessary for further graph analysis. Merges all found peaks into one file per subject.
 
     Parameters:
     raw_ecog (mne.io.Raw): The raw electrocorticography (ECoG) data.
-
-    Returns:
-    None
     '''
     os.chdir("C:/Users/jjbte/Documents/01. Projects/TM3/Afstuderen/TM3_CCEP")
     ## Display the total significant electrode activity on a brain
-    # Run ccep_connectivity.py to get the channel_name_counts.tsv file
+    # Run ccep_merger.py to get the channel_name_counts.tsv file
     ccep_merger.SUBJECT = SUBJECT
     ccep_merger.main()
 
     ## Initialize variables
     os.chdir(f"C:/Users/jjbte/Documents/01. Projects/TM3/Afstuderen/Significant_Electrodes/{SUBJECT}")
     cwd = os.getcwd()
-    rgba = colormaps.get_cmap("Reds")
     channel_count = pd.DataFrame(pd.read_csv(cwd +f"/output/{SUBJECT}_channel_name_counts.tsv",
                                             sep='\t'))
 
@@ -973,6 +989,7 @@ if __name__ == "__main__":
     st = time.time()
     main()
     print("CCEP analysis completed!")
+    # Timer
     et = time.time()
     res = et-st
     res_min = int(res // 60)

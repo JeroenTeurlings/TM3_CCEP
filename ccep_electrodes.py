@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-
 implemented from:
 https://stackoverflow.com/questions/69805091/how-to-create-an-interactive-brain-shaped-graph
-
-@author: jeroen
 """
 import os
 import ast
@@ -18,12 +15,12 @@ import matplotlib.pyplot as plt
 
 # Switches
 HEMI = 'lh'  # 'lh' or 'rh' or 'both'. 'both' will combine both hemispheres faulty
-NODES = False  # True or False. If True, nodes will be plotted. If False, only edges will be plotted
-EDGES = False  # True or False. If True, edges will be plotted. If False, only nodes will be plotted
-MINIMUM_LENGTH = 0  # Minimum length of edges to be plotted
+NODES = True  # True or False. If True, nodes will be plotted. If False, only edges will be plotted
+EDGES = True  # True or False. If True, edges will be plotted. If False, only nodes will be plotted
+MINIMUM_LENGTH = 80  # Minimum length of edges to be plotted
 MAXIMUM_LENGTH = 500 # Maximum length of edges to be plotted
 
-#%% Define function
+# Define mesh function
 def mesh_properties(mesh_coords):
     """Calculate center and radius of sphere minimally containing a 3-D mesh
 
@@ -46,7 +43,7 @@ def mesh_properties(mesh_coords):
 
     return(center, max(radii))
 
-#%% Make graph
+# Define locations of electrode data to be plotted. Results from ccep_merger.py
 if HEMI == 'lh':
     base_folder = 'C:/Users/jjbte/Documents/01. Projects/TM3/Afstuderen/Significant_Electrodes/class_3.4/left/'
 elif HEMI == 'rh':
@@ -60,7 +57,6 @@ else:
 subjects = [f for f in os.listdir(base_folder) if f.startswith('sub-')]
 print("Including subjects: ", subjects)
 
-# total_output = pd.DataFrame()
 edge_unique = []
 mean_coordinates = {}
 # Empty DataFrame to store all data
@@ -94,8 +90,8 @@ for subject in subjects:
         if row['label'] == 0:
             stim_name = f"{row['stim_name']}_{node_counts[row['stim_name']]}"
             rec_name = f"{row['rec_name']}_{node_counts[row['rec_name']]}"
-            amplitude = row['amplitude']  # assuming 'amplitude' is a column in your DataFrame
-            latency = row['latency']  # assuming 'latency' is a column in your DataFrame
+            amplitude = row['amplitude']
+            latency = row['latency']
             G.add_edge(stim_name, rec_name, amplitude=amplitude, latency=latency)
 
     edge_unique.append(list(G.edges(data=True)))  # Include edge data when appending to edge_unique
@@ -137,7 +133,7 @@ for subject in subjects:
             if label not in coord_lists:
                 coord_lists[label] = {'x': [], 'y': [], 'z': []}
             coord_lists[label][k].append(v)
-# Save total_data to a TSV file
+# Save total_data to a TSV file. Uncomment if needed
 # total_data.to_csv('total_data.tsv', sep='\t', index=False)
 mean_coordinates = coord_lists
 
@@ -152,7 +148,7 @@ G = nx.Graph()
 G.add_nodes_from(sorted(G_total.nodes(data=True)))
 G.add_edges_from(G_total.edges(data=True))  # Edge data is preserved when adding edges to G
 
-#%% Download and prepare dataset from BrainNet repo
+# Download and prepare dataset from BrainNet repo for visualization
 coords = np.loadtxt(np.DataSource().open('https://raw.githubusercontent.com/mingruixia/BrainNet-Viewer/master/Data/SurfTemplate/BrainMesh_Ch2_smoothed.nv'), skiprows=1, max_rows=53469)
 x_brain, y_brain, z_brain = coords.T
 
@@ -160,12 +156,12 @@ triangles = np.loadtxt(np.DataSource().open('https://raw.githubusercontent.com/m
 triangles_zero_offset = triangles - 1
 i, j, k = triangles_zero_offset.T
 
-# Generate 3D mesh.  Simply replace with 'fig = go.Figure()' or turn opacity to zero if seeing brain mesh is not desired.
+# Generate 3D mesh.
 fig = go.Figure(data=[go.Mesh3d(x=x_brain, y=y_brain, z=z_brain,
                                  i=i, j=j, k=k,
                                  color='lightpink', opacity=0.25, name='', showscale=False, hoverinfo='none')])
 
-#%% Visualize network
+# Visualize network
 # Create a set to store the nodes of the edges that meet the length criteria
 nodes_to_plot = set()
 
@@ -214,7 +210,7 @@ plt.ylabel('Frequency')
 plt.show()
 
 # Create histogram of latencies
-plt.hist(latencies, bins=177)
+plt.hist(latencies, bins=177) # 'auto' determines the number of bins automatically
 plt.title('Histogram of Latencies')
 plt.xlabel('Latency (s)')
 plt.ylabel('Frequency')
@@ -238,10 +234,10 @@ plt.show()
 # Define your latency range
 MINIMUM_LATENCY = 0.00
 MAXIMUM_LATENCY = 1.00
-MINIMUM_LENGTH_PLOT = 75  # Minimum length of edges to be plotted
+MINIMUM_LENGTH_PLOT = 0  # Minimum length of edges to be plotted
 MAXIMUM_LENGTH_PLOT = 500  # Maximum length of edges to be plotted
 
-# # Print list of edges within the desired length and latency range
+# # Print list of edges within the desired length and latency range. Uncomment if needed
 # print('Edges within the desired length and latency range:')
 # for (s, t), d in distance_dict.items():
 #     latency = float(G[s][t]["latency"].strip('[]'))  # Strip brackets and convert latency to float

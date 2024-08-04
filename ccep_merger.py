@@ -1,4 +1,4 @@
-# Gather all tsv files from a folder and join them into a single tsv file
+# Gather all tsv files from a folder and join them into a single tsv file. Do not run on its own!
 import os
 from pathlib import Path
 import pandas as pd
@@ -9,6 +9,10 @@ OUTPUT = None
 COUNT = None
 
 def main():
+    '''
+    Main function for combining tsv files and counting significant electrodes
+    per subject resulting in one file.
+    '''
     print('Joining tsv files and counting significant electrodes')
     os.chdir(f"C:/Users/jjbte/Documents/01. Projects/TM3/Afstuderen/Significant_Electrodes/{SUBJECT}")
     global FOLDER, OUTPUT, COUNT
